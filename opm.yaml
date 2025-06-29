@@ -1,0 +1,70 @@
+name: lua-resty-digest-auth
+version: 1.0.0
+summary: A modern, production-ready OpenResty module for HTTP Digest Authentication
+description: |
+  A modern, production-ready OpenResty module for HTTP Digest Authentication with advanced security features including brute force protection, rate limiting, and suspicious pattern detection.
+  
+  Features:
+  - RFC 2617 compliant HTTP Digest Authentication
+  - Advanced brute force protection with configurable thresholds
+  - Built-in rate limiting and suspicious pattern detection
+  - Comprehensive monitoring and logging
+  - High performance with optimized nonce management
+  - Simple, plug-and-play configuration
+  
+  Perfect for securing APIs, admin panels, and any OpenResty application requiring robust authentication.
+
+keywords:
+  - authentication
+  - digest
+  - security
+  - http
+  - openresty
+  - nginx
+  - lua
+  - rate-limiting
+  - brute-force-protection
+
+license: MIT
+homepage: https://github.com/ElCruncharino/lua-resty-digest-auth
+repository: https://github.com/ElCruncharino/lua-resty-digest-auth.git
+issues: https://github.com/ElCruncharino/lua-resty-digest-auth/issues
+maintainer: ElCruncharino
+maintainer_email: your.email@example.com
+
+dependencies:
+  - name: openresty
+    version: ">= 1.19.9"
+  - name: lua-resty-core
+    version: ">= 0.1.0"
+  - name: lua-cjson
+    version: ">= 2.1.0"
+  - name: lua-resty-random
+    version: ">= 0.1.0"
+
+files:
+  - lib/resty/digest_auth.lua
+  - README.md
+  - LICENSE
+  - Makefile
+  - examples/
+  - test/
+
+platforms:
+  - linux
+  - freebsd
+  - macos
+
+architectures:
+  - x86_64
+  - aarch64
+  - i386
+
+tags:
+  - authentication
+  - security
+  - http-digest
+  - openresty
+  - nginx
+  - lua
+  - production-ready 
