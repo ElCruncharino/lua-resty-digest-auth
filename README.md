@@ -321,23 +321,6 @@ start_test_server
 test_digest_auth
 ```
 
-### Production Readiness Testing
-```bash
-cd test
-docker-compose up --build -d
-docker cp test_production_ready.sh lua-resty-digest-auth-test:/tmp/
-docker exec lua-resty-digest-auth-test bash -c 'chmod +x /tmp/test_production_ready.sh && /tmp/test_production_ready.sh'
-```
-
-## 📊 Performance
-
-The module is optimized for high-performance environments:
-
-- **Concurrent Requests**: Handles 50+ simultaneous authentication requests
-- **Memory Efficiency**: Minimal memory footprint with shared memory usage
-- **Response Time**: Sub-millisecond authentication response times
-- **Scalability**: Designed for high-traffic environments
-
 ## 🔧 User Credentials File
 
 The credentials file should contain one entry per line in the format:
@@ -430,12 +413,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📞 Support
 
 - **Issues**: [GitHub Issues](https://github.com/ElCruncharino/lua-resty-digest-auth/issues)
-- **Documentation**: [Production Deployment Guide](PRODUCTION_DEPLOYMENT.md)
-- **Testing**: [Test Documentation](test/README.md)
+- **Documentation**: [Test Documentation](test/README.md)
 
 ---
 
-**Ready for production deployment with comprehensive security features!** 🚀 
+**Ready for production deployment with comprehensive security features!** 🚀
 
 ## 🔒 Security Hardening
 
@@ -448,8 +430,3 @@ This module includes additional security mitigations beyond standard Digest Auth
 - Utility for periodic nonce cleanup
 
 These mitigations further reduce the risk of memory exhaustion, log injection, timing attacks, and key collisions. 
-
-- homepage: https://github.com/ElCruncharino/lua-resty-digest-auth
-- repository: https://github.com/ElCruncharino/lua-resty-digest-auth.git
-- issues: https://github.com/ElCruncharino/lua-resty-digest-auth/issues
-- maintainer: ElCruncharino 
