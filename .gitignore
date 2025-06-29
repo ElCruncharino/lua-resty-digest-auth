@@ -20,6 +20,9 @@ Thumbs.db
 *.a
 *.dylib
 
+# Lua bytecode
+*.lua~
+
 # Logs
 *.log
 logs/
@@ -27,6 +30,9 @@ logs/
 # Temporary files
 *.tmp
 *.temp
+*.swp
+*.swo
+*~
 
 # Test files
 test_*.lua
@@ -46,4 +52,16 @@ config.local.lua
 
 # Backup files
 *.bak
-*.backup 
+*.backup
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
+
+# Test artifacts
+test/wget-log
+test/logs/
+
+# Docker
+.dockerignore 
