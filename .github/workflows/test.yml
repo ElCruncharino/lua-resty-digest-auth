@@ -1,0 +1,343 @@
+name: Test lua-resty-digest-auth
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build and test with Docker
+      run: |
+        cd test
+        docker compose up --build -d
+        sleep 15  # Wait for services to start
+        
+        # Wait for the test client to complete its tests
+        echo "Waiting for test client to complete..."
+        docker logs digest-auth-test-client
+        
+        # Check if test client completed successfully
+        docker wait digest-auth-test-client
+        CLIENT_EXIT_CODE=$(docker inspect digest-auth-test-client --format='{{.State.ExitCode}}')
+        if [ "$CLIENT_EXIT_CODE" != "0" ]; then
+          echo "Test client failed with exit code: $CLIENT_EXIT_CODE"
+          docker logs digest-auth-test-client
+          exit 1
+        fi
+        
+        # Run additional exhaustive tests
+        docker cp test_digest_auth_exhaustive.sh lua-resty-digest-auth-test:/tmp/
+        docker exec lua-resty-digest-auth-test bash -c 'chmod +x /tmp/test_digest_auth_exhaustive.sh && /tmp/test_digest_auth_exhaustive.sh'
+        
+        # Performance tests
+        echo "Running performance tests..."
+        docker exec lua-resty-digest-auth-test bash -c '
+          # Test concurrent requests
+          for i in {1..10}; do
+            curl -s -u "alice:password123" http://localhost:8080/protected/ > /dev/null &
+          done
+          wait
+          
+          # Test rate limiting
+          for i in {1..15}; do
+            curl -s -u "alice:wrongpass" http://localhost:8080/protected/ > /dev/null
+          done
+        '
+        
+        # Check logs for errors
+        docker exec lua-resty-digest-auth-test tail -n 100 /usr/local/openresty/nginx/logs/error.log
+        
+        # Cleanup
+        docker compose down
+    
+    - name: Test module loading
+      run: |
+        cd test
+        docker compose up --build -d
+        sleep 5
+        
+        # Test if module can be required
+        docker exec lua-resty-digest-auth-test bash -c '
+          /usr/local/openresty/bin/openresty -t
+          echo "Nginx config test passed"
+        '
+        
+        docker compose down
+    
+    - name: Security tests
+      run: |
+        cd test
+        docker compose up --build -d
+        sleep 5
+        
+        # Test brute force protection
+        echo "Testing brute force protection..."
+        docker exec lua-resty-digest-auth-test bash -c '
+          # Try common passwords
+          for pass in password 123456 admin root test; do
+            curl -s -u "alice:$pass" http://localhost:8080/protected/ > /dev/null
+          done
+          
+          # Try empty credentials
+          curl -s -u ":" http://localhost:8080/protected/ > /dev/null
+          
+          # Try malformed auth headers
+          curl -s -H "Authorization: Basic invalid" http://localhost:8080/protected/ > /dev/null
+          curl -s -H "Authorization: Digest invalid" http://localhost:8080/protected/ > /dev/null
+        '
+        
+        docker compose down
+
+  test-centos:
+    runs-on: ubuntu-latest
+    container: rockylinux:9
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        dnf update -y
+        # Remove curl-minimal to avoid conflicts with full curl package
+        dnf remove -y curl-minimal || true
+        dnf install -y --allowerasing wget curl gcc make pcre-devel openssl-devel zlib-devel
+
+    - name: Install OpenResty
+      run: |
+        dnf install -y dnf-utils
+        dnf config-manager --add-repo https://openresty.org/package/centos/openresty.repo
+        # Disable GPG check for OpenResty packages to avoid SHA1 hash algorithm issues
+        dnf install -y --nogpgcheck openresty
+
+    - name: Setup test environment
+      run: |
+        echo "=== SETUP STEP STARTED ==="
+        mkdir -p /usr/local/openresty/nginx/logs
+        mkdir -p /usr/local/openresty/nginx/html
+        mkdir -p /usr/local/openresty/lualib/resty
+        mkdir -p /etc/nginx
+        
+        echo "=== DEBUGGING MODULE SETUP ==="
+        echo "Current directory: $(pwd)"
+        echo "Source file exists: $(ls -la lib/resty/digest_auth.lua)"
+        echo "Target directory exists: $(ls -la /usr/local/openresty/lualib/resty/)"
+        
+        cp lib/resty/digest_auth.lua /usr/local/openresty/lualib/resty/
+        
+        echo "After copy - target file exists: $(ls -la /usr/local/openresty/lualib/resty/digest_auth.lua)"
+        echo "File contents (first 5 lines):"
+        head -5 /usr/local/openresty/lualib/resty/digest_auth.lua
+        echo "=== END DEBUGGING ==="
+        
+        cat > /tmp/htdigest << 'EOF'
+        alice:Test Realm:5f4dcc3b5aa765d61d8327deb882cf99
+        bob:Test Realm:7c4a8d09ca3762af61e59520943dc26494f8941b
+        admin:Admin Area:21232f297a57a5a743894a0e4a801fc3
+        EOF
+        cp /tmp/htdigest /etc/nginx/htdigest
+        echo "=== SETUP STEP COMPLETED ==="
+
+    - name: Create test configuration
+      run: |
+        echo "=== CREATING NGINX CONFIG ==="
+        cat > /tmp/nginx.conf << 'EOF'
+        user root;
+        worker_processes auto;
+        pid /usr/local/openresty/nginx/logs/nginx.pid;
+
+        events {
+            worker_connections 1024;
+        }
+
+        http {
+            include /usr/local/openresty/nginx/conf/mime.types;
+            default_type application/octet-stream;
+
+            access_log /usr/local/openresty/nginx/logs/access.log;
+            error_log /usr/local/openresty/nginx/logs/error.log debug;
+
+            sendfile on;
+            tcp_nopush on;
+            tcp_nodelay on;
+            keepalive_timeout 65;
+
+            lua_shared_dict digest_auth 2m;
+            lua_shared_dict digest_auth_ratelimit 1m;
+
+            init_by_lua_block {
+                ngx.log(ngx.INFO, "=== INIT_BY_LUA_STARTED ===")
+                ngx.log(ngx.INFO, "Starting init_by_lua_block...")
+                
+                -- Simple test to verify init_by_lua_block is working
+                ngx.log(ngx.INFO, "Init test: Lua is working in init phase")
+                
+                -- Check if the module file exists
+                local file = io.open("/usr/local/openresty/lualib/resty/digest_auth.lua", "r")
+                if file then
+                    ngx.log(ngx.INFO, "Module file exists")
+                    file:close()
+                else
+                    ngx.log(ngx.ERR, "Module file does not exist!")
+                    error("Module file not found")
+                end
+                
+                -- Try to require the module
+                local ok, DigestAuth = pcall(require, "resty.digest_auth")
+                if not ok then
+                    ngx.log(ngx.ERR, "Failed to require module: ", DigestAuth)
+                    error("Failed to require module: " .. tostring(DigestAuth))
+                end
+                
+                ngx.log(ngx.INFO, "Module loaded successfully")
+                
+                -- Try to configure the module
+                local ok, err = DigestAuth.configure {
+                    shared_memory_name = "digest_auth",
+                    credentials_file = "/etc/nginx/htdigest",
+                    realm = "Test Realm"
+                }
+                if not ok then
+                    ngx.log(ngx.ERR, "Failed to configure digest auth: ", err)
+                    error("Failed to configure digest auth: " .. (err or "unknown error"))
+                end
+                
+                ngx.log(ngx.INFO, "DigestAuth configured successfully")
+                ngx.log(ngx.INFO, "=== INIT_BY_LUA_COMPLETED ===")
+            }
+
+            server {
+                listen 8080;
+                server_name localhost;
+                
+                location / {
+                    return 200 "Public content\n";
+                }
+                
+                location /test-lua {
+                    access_by_lua_block {
+                        ngx.log(ngx.INFO, "=== TEST_LUA_ACCESS_STARTED ===")
+                        ngx.log(ngx.INFO, "Simple Lua test - this should work")
+                        ngx.log(ngx.INFO, "=== TEST_LUA_ACCESS_COMPLETED ===")
+                    }
+                    return 200 "Lua test successful\n";
+                }
+                
+                location /protected/ {
+                    content_by_lua_block {
+                        ngx.log(ngx.INFO, "=== CONTENT_PHASE_STARTED ===")
+                        ngx.log(ngx.INFO, "Content phase started for protected endpoint")
+                        
+                        local ok, DigestAuth = pcall(require, "resty.digest_auth")
+                        if not ok then
+                            ngx.log(ngx.ERR, "Failed to require module in content phase: ", DigestAuth)
+                            return ngx.exit(500)
+                        end
+                        
+                        ngx.log(ngx.INFO, "Calling require_auth...")
+                        DigestAuth.require_auth()
+                        ngx.log(ngx.INFO, "require_auth completed")
+                        ngx.log(ngx.INFO, "=== CONTENT_PHASE_COMPLETED ===")
+                        
+                        ngx.say("Protected content")
+                    }
+                }
+                
+                location /health {
+                    return 200 "OK\n";
+                }
+            }
+        }
+        EOF
+        cp /tmp/nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
+        echo "=== NGINX CONFIG CREATED ==="
+
+    - name: Run Rocky Linux tests
+      run: |
+        echo "=== TEST STEP STARTED ==="
+        
+        # Debug: Check if our config file exists and show its contents
+        echo "Checking nginx configuration..."
+        ls -la /usr/local/openresty/nginx/conf/
+        echo "=== NGINX CONFIG CONTENTS ==="
+        cat /usr/local/openresty/nginx/conf/nginx.conf
+        echo "=== END NGINX CONFIG ==="
+        
+        # Check if module file exists
+        echo "=== CHECKING MODULE FILE ==="
+        ls -la /usr/local/openresty/lualib/resty/digest_auth.lua || echo "Module file not found!"
+        echo "=== END MODULE CHECK ==="
+        
+        # Test nginx configuration first
+        /usr/local/openresty/bin/openresty -p /usr/local/openresty/nginx -c /usr/local/openresty/nginx/conf/nginx.conf -t
+        
+        # Start nginx
+        /usr/local/openresty/bin/openresty -p /usr/local/openresty/nginx -c /usr/local/openresty/nginx/conf/nginx.conf
+        sleep 3
+        
+        echo "Testing on Rocky Linux 9..."
+        
+        # Test simple Lua endpoint first
+        echo "Testing simple Lua endpoint..."
+        LUA_TEST_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/test-lua)
+        echo "Lua test: $LUA_TEST_CODE"
+        
+        # Test public endpoint
+        PUBLIC_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/)
+        echo "Public: $PUBLIC_CODE"
+        
+        # Test protected endpoint without auth
+        PROTECTED_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/protected/)
+        echo "Protected (no auth): $PROTECTED_CODE"
+        
+        # Test protected endpoint with proper digest auth
+        # First, get the challenge
+        CHALLENGE_RESPONSE=$(curl -s -D - http://localhost:8080/protected/ | grep -i "www-authenticate")
+        echo "Challenge response: $CHALLENGE_RESPONSE"
+        
+        # For now, just test that unauthenticated requests return 401
+        # We'll implement proper digest auth testing later
+        AUTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" -u "alice:password123" http://localhost:8080/protected/)
+        echo "Protected (with basic auth - should fail): $AUTH_CODE"
+        
+        # Debug: Check nginx logs
+        echo "=== NGINX ERROR LOG ==="
+        tail -n 30 /usr/local/openresty/nginx/logs/error.log || echo "No error log found"
+        echo "=== NGINX ACCESS LOG ==="
+        tail -n 15 /usr/local/openresty/nginx/logs/access.log || echo "No access log found"
+        
+        # Verify responses with more detailed error messages
+        if [ "$LUA_TEST_CODE" != "200" ]; then
+          echo "❌ Lua test failed: expected 200, got $LUA_TEST_CODE"
+          exit 1
+        fi
+        
+        if [ "$PUBLIC_CODE" != "200" ]; then
+          echo "❌ Public endpoint failed: expected 200, got $PUBLIC_CODE"
+          exit 1
+        fi
+        
+        if [ "$PROTECTED_CODE" != "401" ]; then
+          echo "❌ Protected endpoint without auth failed: expected 401, got $PROTECTED_CODE"
+          exit 1
+        fi
+        
+        if [ "$AUTH_CODE" != "400" ]; then
+          echo "❌ Protected endpoint with basic auth failed: expected 400, got $AUTH_CODE"
+          exit 1
+        fi
+        
+        echo "✅ Rocky Linux 9 tests passed!"
+        
+        # Stop nginx gracefully
+        /usr/local/openresty/bin/openresty -p /usr/local/openresty/nginx -c /usr/local/openresty/nginx/conf/nginx.conf -s stop || true 

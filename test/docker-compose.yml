@@ -1,0 +1,43 @@
+services:
+  digest-auth-test:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - NGINX_PORT=8080
+    volumes:
+      # Optional: mount logs for debugging
+      - ./logs:/usr/local/openresty/nginx/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    container_name: lua-resty-digest-auth-test
+
+  # Optional: Add a test client container
+  test-client:
+    image: curlimages/curl:latest
+    depends_on:
+      - digest-auth-test
+    command: >
+      sh -c "
+        echo 'Waiting for server to start...' &&
+        sleep 10 &&
+        echo 'Testing public endpoint...' &&
+        curl -s -o /dev/null -w 'Public: %{http_code}\n' http://digest-auth-test:8080/ &&
+        echo 'Testing protected endpoint (no auth)...' &&
+        curl -s -o /dev/null -w 'Protected (no auth): %{http_code}\n' http://digest-auth-test:8080/protected/ &&
+        echo 'Testing protected endpoint (valid auth)...' &&
+        curl -s -o /dev/null -w 'Protected (valid): %{http_code}\n' -u alice:password123 http://digest-auth-test:8080/protected/ &&
+        echo 'Testing API endpoint...' &&
+        curl -s -o /dev/null -w 'API: %{http_code}\n' -u bob:secret456 http://digest-auth-test:8080/api/ &&
+        echo 'Testing admin endpoint...' &&
+        curl -s -o /dev/null -w 'Admin: %{http_code}\n' -u admin:adminpass http://digest-auth-test:8080/admin/ &&
+        echo '✅ All tests completed!'
+      "
+    container_name: digest-auth-test-client 

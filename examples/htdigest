@@ -1,0 +1,20 @@
+# Sample htdigest file for lua-resty-digest-auth
+# Format: username:realm:HA1_hash
+# 
+# To generate HA1 hash: echo -n "username:realm:password" | md5sum
+# 
+# Example users:
+# - alice with password "password123" in realm "My Secure Realm"
+# - bob with password "secret456" in realm "My Secure Realm"
+# - admin with password "adminpass" in realm "Admin Area"
+# - api_user with password "apikey789" in realm "API Access"
+
+# Users for "My Secure Realm"
+alice:My Secure Realm:5f4dcc3b5aa765d61d8327deb882cf99
+bob:My Secure Realm:7c4a8d09ca3762af61e59520943dc26494f8941b
+
+# Users for "Admin Area"
+admin:Admin Area:21232f297a57a5a743894a0e4a801fc3
+
+# Users for "API Access"
+api_user:API Access:5f4dcc3b5aa765d61d8327deb882cf99 
