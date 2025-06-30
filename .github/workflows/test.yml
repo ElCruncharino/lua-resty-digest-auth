@@ -126,7 +126,18 @@ jobs:
         mkdir -p /usr/local/openresty/nginx/html
         mkdir -p /usr/local/openresty/lualib/resty
         mkdir -p /etc/nginx
+        
+        echo "=== DEBUGGING MODULE SETUP ==="
+        echo "Current directory: $(pwd)"
+        echo "Source file exists: $(ls -la lib/resty/digest_auth.lua)"
+        echo "Target directory exists: $(ls -la /usr/local/openresty/lualib/resty/)"
+        
         cp lib/resty/digest_auth.lua /usr/local/openresty/lualib/resty/
+        
+        echo "After copy - target file exists: $(ls -la /usr/local/openresty/lualib/resty/digest_auth.lua)"
+        echo "File contents (first 5 lines):"
+        head -5 /usr/local/openresty/lualib/resty/digest_auth.lua
+        echo "=== END DEBUGGING ==="
         
         cat > /tmp/htdigest << 'EOF'
         alice:Test Realm:5f4dcc3b5aa765d61d8327deb882cf99
