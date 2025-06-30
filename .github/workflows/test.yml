@@ -151,7 +151,7 @@ jobs:
             default_type application/octet-stream;
 
             access_log /usr/local/openresty/nginx/logs/access.log;
-            error_log /usr/local/openresty/nginx/logs/error.log;
+            error_log /usr/local/openresty/nginx/logs/error.log debug;
 
             sendfile on;
             tcp_nopush on;
@@ -162,15 +162,39 @@ jobs:
             lua_shared_dict digest_auth_ratelimit 1m;
 
             init_by_lua_block {
-                local DigestAuth = require "resty.digest_auth"
+                ngx.log(ngx.INFO, "Starting init_by_lua_block...")
+                
+                -- Check if the module file exists
+                local file = io.open("/usr/local/openresty/lualib/resty/digest_auth.lua", "r")
+                if file then
+                    ngx.log(ngx.INFO, "Module file exists")
+                    file:close()
+                else
+                    ngx.log(ngx.ERR, "Module file does not exist!")
+                    error("Module file not found")
+                end
+                
+                -- Try to require the module
+                local ok, DigestAuth = pcall(require, "resty.digest_auth")
+                if not ok then
+                    ngx.log(ngx.ERR, "Failed to require module: ", DigestAuth)
+                    error("Failed to require module: " .. tostring(DigestAuth))
+                end
+                
+                ngx.log(ngx.INFO, "Module loaded successfully")
+                
+                -- Try to configure the module
                 local ok, err = DigestAuth.configure {
                     shared_memory_name = "digest_auth",
                     credentials_file = "/etc/nginx/htdigest",
                     realm = "Test Realm"
                 }
                 if not ok then
+                    ngx.log(ngx.ERR, "Failed to configure digest auth: ", err)
                     error("Failed to configure digest auth: " .. (err or "unknown error"))
                 end
+                
+                ngx.log(ngx.INFO, "DigestAuth configured successfully")
             }
 
             server {
@@ -183,8 +207,17 @@ jobs:
                 
                 location /protected/ {
                     access_by_lua_block {
-                        local DigestAuth = require "resty.digest_auth"
+                        ngx.log(ngx.INFO, "Access phase started for protected endpoint")
+                        
+                        local ok, DigestAuth = pcall(require, "resty.digest_auth")
+                        if not ok then
+                            ngx.log(ngx.ERR, "Failed to require module in access phase: ", DigestAuth)
+                            return ngx.exit(500)
+                        end
+                        
+                        ngx.log(ngx.INFO, "Calling require_auth...")
                         DigestAuth.require_auth()
+                        ngx.log(ngx.INFO, "require_auth completed")
                     }
                     return 200 "Protected content\n";
                 }
