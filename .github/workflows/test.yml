@@ -90,7 +90,7 @@ jobs:
 
   test-centos:
     runs-on: ubuntu-latest
-    container: centos:8
+    container: rockylinux:9
 
     steps:
     - name: Checkout code
@@ -98,14 +98,14 @@ jobs:
 
     - name: Install dependencies
       run: |
-        yum update -y
-        yum install -y wget curl gcc make pcre-devel openssl-devel zlib-devel
+        dnf update -y
+        dnf install -y wget curl gcc make pcre-devel openssl-devel zlib-devel
 
     - name: Install OpenResty
       run: |
-        yum install -y yum-utils
-        yum-config-manager --add-repo https://openresty.org/package/centos/openresty.repo
-        yum install -y openresty
+        dnf install -y dnf-utils
+        dnf config-manager --add-repo https://openresty.org/package/centos/openresty.repo
+        dnf install -y openresty
 
     - name: Setup test environment
       run: |
@@ -183,12 +183,12 @@ jobs:
         EOF
         cp /tmp/nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
 
-    - name: Run CentOS tests
+    - name: Run Rocky Linux tests
       run: |
         /usr/local/openresty/bin/openresty -p /usr/local/openresty/nginx -c /usr/local/openresty/nginx/conf/nginx.conf
         sleep 2
         
-        echo "Testing on CentOS..."
+        echo "Testing on Rocky Linux 9..."
         curl -s -o /dev/null -w "Public: %{http_code}\n" http://localhost:8080/
         curl -s -o /dev/null -w "Protected: %{http_code}\n" http://localhost:8080/protected/
         curl -s -o /dev/null -w "Auth: %{http_code}\n" -u "alice:password123" http://localhost:8080/protected/
@@ -198,9 +198,9 @@ jobs:
         [ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/protected/)" = "401" ] || exit 1
         [ "$(curl -s -o /dev/null -w "%{http_code}" -u "alice:password123" http://localhost:8080/protected/)" = "200" ] || exit 1
         
-        echo "✅ CentOS tests passed!"
+        echo "✅ Rocky Linux 9 tests passed!"
 
-    - name: Cleanup CentOS
+    - name: Cleanup Rocky Linux
       if: always()
       run: |
         /usr/local/openresty/bin/openresty -p /usr/local/openresty/nginx -c /usr/local/openresty/nginx/conf/nginx.conf -s stop || true 
