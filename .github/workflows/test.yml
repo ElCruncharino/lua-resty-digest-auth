@@ -20,12 +20,22 @@ jobs:
       run: |
         cd test
         docker compose up --build -d
-        sleep 10  # Wait for services to start
+        sleep 15  # Wait for services to start
         
-        # Run basic tests
-        docker exec lua-resty-digest-auth-test-client /usr/local/bin/test_digest_auth
+        # Wait for the test client to complete its tests
+        echo "Waiting for test client to complete..."
+        docker logs digest-auth-test-client
         
-        # Run exhaustive tests
+        # Check if test client completed successfully
+        docker wait digest-auth-test-client
+        CLIENT_EXIT_CODE=$(docker inspect digest-auth-test-client --format='{{.State.ExitCode}}')
+        if [ "$CLIENT_EXIT_CODE" != "0" ]; then
+          echo "Test client failed with exit code: $CLIENT_EXIT_CODE"
+          docker logs digest-auth-test-client
+          exit 1
+        fi
+        
+        # Run additional exhaustive tests
         docker cp test_digest_auth_exhaustive.sh lua-resty-digest-auth-test:/tmp/
         docker exec lua-resty-digest-auth-test bash -c 'chmod +x /tmp/test_digest_auth_exhaustive.sh && /tmp/test_digest_auth_exhaustive.sh'
         
