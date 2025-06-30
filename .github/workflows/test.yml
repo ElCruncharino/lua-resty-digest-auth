@@ -199,19 +199,55 @@ jobs:
 
     - name: Run Rocky Linux tests
       run: |
+        # Debug: Check if our config file exists and show its contents
+        echo "Checking nginx configuration..."
+        ls -la /usr/local/openresty/nginx/conf/
+        echo "=== NGINX CONFIG CONTENTS ==="
+        cat /usr/local/openresty/nginx/conf/nginx.conf
+        echo "=== END NGINX CONFIG ==="
+        
+        # Test nginx configuration first
+        /usr/local/openresty/bin/openresty -p /usr/local/openresty/nginx -c /usr/local/openresty/nginx/conf/nginx.conf -t
+        
         # Start nginx
         /usr/local/openresty/bin/openresty -p /usr/local/openresty/nginx -c /usr/local/openresty/nginx/conf/nginx.conf
-        sleep 2
+        sleep 3
         
         echo "Testing on Rocky Linux 9..."
-        curl -s -o /dev/null -w "Public: %{http_code}\n" http://localhost:8080/
-        curl -s -o /dev/null -w "Protected: %{http_code}\n" http://localhost:8080/protected/
-        curl -s -o /dev/null -w "Auth: %{http_code}\n" -u "alice:password123" http://localhost:8080/protected/
         
-        # Verify responses
-        [ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/)" = "200" ] || exit 1
-        [ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/protected/)" = "401" ] || exit 1
-        [ "$(curl -s -o /dev/null -w "%{http_code}" -u "alice:password123" http://localhost:8080/protected/)" = "200" ] || exit 1
+        # Test public endpoint
+        PUBLIC_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/)
+        echo "Public: $PUBLIC_CODE"
+        
+        # Test protected endpoint without auth
+        PROTECTED_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/protected/)
+        echo "Protected (no auth): $PROTECTED_CODE"
+        
+        # Test protected endpoint with auth
+        AUTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" -u "alice:password123" http://localhost:8080/protected/)
+        echo "Protected (with auth): $AUTH_CODE"
+        
+        # Debug: Check nginx logs
+        echo "=== NGINX ERROR LOG ==="
+        tail -n 20 /usr/local/openresty/nginx/logs/error.log || echo "No error log found"
+        echo "=== NGINX ACCESS LOG ==="
+        tail -n 10 /usr/local/openresty/nginx/logs/access.log || echo "No access log found"
+        
+        # Verify responses with more detailed error messages
+        if [ "$PUBLIC_CODE" != "200" ]; then
+          echo "❌ Public endpoint failed: expected 200, got $PUBLIC_CODE"
+          exit 1
+        fi
+        
+        if [ "$PROTECTED_CODE" != "401" ]; then
+          echo "❌ Protected endpoint without auth failed: expected 401, got $PROTECTED_CODE"
+          exit 1
+        fi
+        
+        if [ "$AUTH_CODE" != "200" ]; then
+          echo "❌ Protected endpoint with auth failed: expected 200, got $AUTH_CODE"
+          exit 1
+        fi
         
         echo "✅ Rocky Linux 9 tests passed!"
         
