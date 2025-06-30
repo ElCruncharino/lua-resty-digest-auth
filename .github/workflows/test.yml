@@ -109,7 +109,9 @@ jobs:
     - name: Install dependencies
       run: |
         dnf update -y
-        dnf install -y wget curl gcc make pcre-devel openssl-devel zlib-devel
+        # Remove curl-minimal to avoid conflicts with full curl package
+        dnf remove -y curl-minimal || true
+        dnf install -y --allowerasing wget curl gcc make pcre-devel openssl-devel zlib-devel
 
     - name: Install OpenResty
       run: |
