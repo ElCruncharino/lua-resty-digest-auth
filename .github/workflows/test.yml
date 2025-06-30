@@ -234,22 +234,23 @@ jobs:
                 }
                 
                 location /protected/ {
-                    access_by_lua_block {
-                        ngx.log(ngx.INFO, "=== ACCESS_PHASE_STARTED ===")
-                        ngx.log(ngx.INFO, "Access phase started for protected endpoint")
+                    content_by_lua_block {
+                        ngx.log(ngx.INFO, "=== CONTENT_PHASE_STARTED ===")
+                        ngx.log(ngx.INFO, "Content phase started for protected endpoint")
                         
                         local ok, DigestAuth = pcall(require, "resty.digest_auth")
                         if not ok then
-                            ngx.log(ngx.ERR, "Failed to require module in access phase: ", DigestAuth)
+                            ngx.log(ngx.ERR, "Failed to require module in content phase: ", DigestAuth)
                             return ngx.exit(500)
                         end
                         
                         ngx.log(ngx.INFO, "Calling require_auth...")
                         DigestAuth.require_auth()
                         ngx.log(ngx.INFO, "require_auth completed")
-                        ngx.log(ngx.INFO, "=== ACCESS_PHASE_COMPLETED ===")
+                        ngx.log(ngx.INFO, "=== CONTENT_PHASE_COMPLETED ===")
+                        
+                        ngx.say("Protected content")
                     }
-                    return 200 "Protected content\n";
                 }
                 
                 location /health {
