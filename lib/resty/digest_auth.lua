@@ -655,8 +655,7 @@ function DigestAuth.require_auth(realm)
     -- Authentication successful
     reset_rate_limit(client_ip)
     ngx_log(ngx_INFO, "Authentication successful for user: ", sanitize_log_value(auth_data.username), " from: ", sanitize_log_value(client_ip))
-    -- Don't exit here - let the request continue to the next phase
-    return
+    return ngx.exit(ngx.OK)
 end
 
 -- Utility functions
