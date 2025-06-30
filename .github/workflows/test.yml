@@ -19,7 +19,7 @@ jobs:
     - name: Build and test with Docker
       run: |
         cd test
-        docker-compose up --build -d
+        docker compose up --build -d
         sleep 10  # Wait for services to start
         
         # Run basic tests
@@ -48,12 +48,12 @@ jobs:
         docker exec lua-resty-digest-auth-test tail -n 100 /usr/local/openresty/nginx/logs/error.log
         
         # Cleanup
-        docker-compose down
+        docker compose down
     
     - name: Test module loading
       run: |
         cd test
-        docker-compose up --build -d
+        docker compose up --build -d
         sleep 5
         
         # Test if module can be required
@@ -62,12 +62,12 @@ jobs:
           echo "Nginx config test passed"
         '
         
-        docker-compose down
+        docker compose down
     
     - name: Security tests
       run: |
         cd test
-        docker-compose up --build -d
+        docker compose up --build -d
         sleep 5
         
         # Test brute force protection
@@ -86,7 +86,7 @@ jobs:
           curl -s -H "Authorization: Digest invalid" http://localhost:8080/protected/ > /dev/null
         '
         
-        docker-compose down
+        docker compose down
 
   test-centos:
     runs-on: ubuntu-latest
