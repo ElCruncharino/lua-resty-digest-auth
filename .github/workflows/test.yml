@@ -179,6 +179,9 @@ jobs:
                 ngx.log(ngx.INFO, "=== INIT_BY_LUA_STARTED ===")
                 ngx.log(ngx.INFO, "Starting init_by_lua_block...")
                 
+                -- Simple test to verify init_by_lua_block is working
+                ngx.log(ngx.INFO, "Init test: Lua is working in init phase")
+                
                 -- Check if the module file exists
                 local file = io.open("/usr/local/openresty/lualib/resty/digest_auth.lua", "r")
                 if file then
@@ -260,12 +263,19 @@ jobs:
 
     - name: Run Rocky Linux tests
       run: |
+        echo "=== TEST STEP STARTED ==="
+        
         # Debug: Check if our config file exists and show its contents
         echo "Checking nginx configuration..."
         ls -la /usr/local/openresty/nginx/conf/
         echo "=== NGINX CONFIG CONTENTS ==="
         cat /usr/local/openresty/nginx/conf/nginx.conf
         echo "=== END NGINX CONFIG ==="
+        
+        # Check if module file exists
+        echo "=== CHECKING MODULE FILE ==="
+        ls -la /usr/local/openresty/lualib/resty/digest_auth.lua || echo "Module file not found!"
+        echo "=== END MODULE CHECK ==="
         
         # Test nginx configuration first
         /usr/local/openresty/bin/openresty -p /usr/local/openresty/nginx -c /usr/local/openresty/nginx/conf/nginx.conf -t
