@@ -125,6 +125,7 @@ jobs:
         mkdir -p /usr/local/openresty/nginx/logs
         mkdir -p /usr/local/openresty/nginx/html
         mkdir -p /usr/local/openresty/lualib/resty
+        mkdir -p /etc/nginx
         cp lib/resty/digest_auth.lua /usr/local/openresty/lualib/resty/
         
         cat > /tmp/htdigest << 'EOF'
@@ -139,7 +140,7 @@ jobs:
         cat > /tmp/nginx.conf << 'EOF'
         user nginx;
         worker_processes auto;
-        pid /run/nginx.pid;
+        pid /usr/local/openresty/nginx/logs/nginx.pid;
 
         events {
             worker_connections 1024;
@@ -198,6 +199,7 @@ jobs:
 
     - name: Run Rocky Linux tests
       run: |
+        # Start nginx
         /usr/local/openresty/bin/openresty -p /usr/local/openresty/nginx -c /usr/local/openresty/nginx/conf/nginx.conf
         sleep 2
         
@@ -212,8 +214,6 @@ jobs:
         [ "$(curl -s -o /dev/null -w "%{http_code}" -u "alice:password123" http://localhost:8080/protected/)" = "200" ] || exit 1
         
         echo "✅ Rocky Linux 9 tests passed!"
-
-    - name: Cleanup Rocky Linux
-      if: always()
-      run: |
+        
+        # Stop nginx gracefully
         /usr/local/openresty/bin/openresty -p /usr/local/openresty/nginx -c /usr/local/openresty/nginx/conf/nginx.conf -s stop || true 
