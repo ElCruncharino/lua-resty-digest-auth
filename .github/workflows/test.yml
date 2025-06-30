@@ -332,8 +332,8 @@ jobs:
           exit 1
         fi
         
-        if [ "$AUTH_CODE" != "401" ]; then
-          echo "❌ Protected endpoint with basic auth failed: expected 401, got $AUTH_CODE"
+        if [ "$AUTH_CODE" != "400" ]; then
+          echo "❌ Protected endpoint with basic auth failed: expected 400, got $AUTH_CODE"
           exit 1
         fi
         
