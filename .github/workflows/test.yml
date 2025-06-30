@@ -117,7 +117,8 @@ jobs:
       run: |
         dnf install -y dnf-utils
         dnf config-manager --add-repo https://openresty.org/package/centos/openresty.repo
-        dnf install -y openresty
+        # Disable GPG check for OpenResty packages to avoid SHA1 hash algorithm issues
+        dnf install -y --nogpgcheck openresty
 
     - name: Setup test environment
       run: |
