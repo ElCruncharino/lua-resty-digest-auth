@@ -1,0 +1,70 @@
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+*.o
+*.so
+*.a
+*.dylib
+
+# Lua bytecode
+*.lua~
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Test files
+test_*.lua
+*.test
+
+# Documentation build
+docs/_build/
+
+# Package files
+*.tar.gz
+*.zip
+
+# Local configuration
+.env
+.env.local
+config.local.lua
+
+# Backup files
+*.bak
+*.backup
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
+
+# Test artifacts
+test/wget-log
+test/logs/
+
+# Docker
+.dockerignore
+
+# OPM credentials
+.opmrc 
