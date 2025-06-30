@@ -122,6 +122,7 @@ jobs:
 
     - name: Setup test environment
       run: |
+        echo "=== SETUP STEP STARTED ==="
         mkdir -p /usr/local/openresty/nginx/logs
         mkdir -p /usr/local/openresty/nginx/html
         mkdir -p /usr/local/openresty/lualib/resty
@@ -145,9 +146,11 @@ jobs:
         admin:Admin Area:21232f297a57a5a743894a0e4a801fc3
         EOF
         cp /tmp/htdigest /etc/nginx/htdigest
+        echo "=== SETUP STEP COMPLETED ==="
 
     - name: Create test configuration
       run: |
+        echo "=== CREATING NGINX CONFIG ==="
         cat > /tmp/nginx.conf << 'EOF'
         user root;
         worker_processes auto;
@@ -173,6 +176,7 @@ jobs:
             lua_shared_dict digest_auth_ratelimit 1m;
 
             init_by_lua_block {
+                ngx.log(ngx.INFO, "=== INIT_BY_LUA_STARTED ===")
                 ngx.log(ngx.INFO, "Starting init_by_lua_block...")
                 
                 -- Check if the module file exists
@@ -206,6 +210,7 @@ jobs:
                 end
                 
                 ngx.log(ngx.INFO, "DigestAuth configured successfully")
+                ngx.log(ngx.INFO, "=== INIT_BY_LUA_COMPLETED ===")
             }
 
             server {
@@ -216,8 +221,18 @@ jobs:
                     return 200 "Public content\n";
                 }
                 
+                location /test-lua {
+                    access_by_lua_block {
+                        ngx.log(ngx.INFO, "=== TEST_LUA_ACCESS_STARTED ===")
+                        ngx.log(ngx.INFO, "Simple Lua test - this should work")
+                        ngx.log(ngx.INFO, "=== TEST_LUA_ACCESS_COMPLETED ===")
+                    }
+                    return 200 "Lua test successful\n";
+                }
+                
                 location /protected/ {
                     access_by_lua_block {
+                        ngx.log(ngx.INFO, "=== ACCESS_PHASE_STARTED ===")
                         ngx.log(ngx.INFO, "Access phase started for protected endpoint")
                         
                         local ok, DigestAuth = pcall(require, "resty.digest_auth")
@@ -229,6 +244,7 @@ jobs:
                         ngx.log(ngx.INFO, "Calling require_auth...")
                         DigestAuth.require_auth()
                         ngx.log(ngx.INFO, "require_auth completed")
+                        ngx.log(ngx.INFO, "=== ACCESS_PHASE_COMPLETED ===")
                     }
                     return 200 "Protected content\n";
                 }
@@ -240,6 +256,7 @@ jobs:
         }
         EOF
         cp /tmp/nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
+        echo "=== NGINX CONFIG CREATED ==="
 
     - name: Run Rocky Linux tests
       run: |
@@ -259,6 +276,11 @@ jobs:
         
         echo "Testing on Rocky Linux 9..."
         
+        # Test simple Lua endpoint first
+        echo "Testing simple Lua endpoint..."
+        LUA_TEST_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/test-lua)
+        echo "Lua test: $LUA_TEST_CODE"
+        
         # Test public endpoint
         PUBLIC_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/)
         echo "Public: $PUBLIC_CODE"
@@ -273,11 +295,16 @@ jobs:
         
         # Debug: Check nginx logs
         echo "=== NGINX ERROR LOG ==="
-        tail -n 20 /usr/local/openresty/nginx/logs/error.log || echo "No error log found"
+        tail -n 30 /usr/local/openresty/nginx/logs/error.log || echo "No error log found"
         echo "=== NGINX ACCESS LOG ==="
-        tail -n 10 /usr/local/openresty/nginx/logs/access.log || echo "No access log found"
+        tail -n 15 /usr/local/openresty/nginx/logs/access.log || echo "No access log found"
         
         # Verify responses with more detailed error messages
+        if [ "$LUA_TEST_CODE" != "200" ]; then
+          echo "❌ Lua test failed: expected 200, got $LUA_TEST_CODE"
+          exit 1
+        fi
+        
         if [ "$PUBLIC_CODE" != "200" ]; then
           echo "❌ Public endpoint failed: expected 200, got $PUBLIC_CODE"
           exit 1
