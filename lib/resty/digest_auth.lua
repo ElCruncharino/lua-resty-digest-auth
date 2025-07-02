@@ -620,7 +620,6 @@ function DigestAuth.require_auth(realm)
     local auth_header = ngx.var.http_authorization
     if not auth_header then
         ngx_log(ngx_DEBUG, "No authorization header from: ", client_ip)
-        increment_failed_attempts(client_ip, nil)
         return send_challenge(false)
     end
     
