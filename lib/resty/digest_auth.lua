@@ -145,30 +145,9 @@ local function parse_authorization_header(header)
         ngx_log(ngx_WARN, "Invalid UTF-8 in realm")
         return nil
     end
-    
-    -- RFC 7616 section 5.1: Username and realm must be valid UTF-8
-    local function validate_utf8(str)
-        return pcall(function() require("utf8").len(str) end)
-    end
-    
-    if not validate_utf8(auth_data.username) then
-        ngx_log(ngx_WARN, "Invalid UTF-8 in username")
-        return nil
-    end
-    
-    if not validate_utf8(auth_data.realm) then
-        ngx_log(ngx_WARN, "Invalid UTF-8 in realm")
-        return nil
-    end
     auth_data.nonce = extract_header_value(header, "nonce", true)
     auth_data.nc = extract_header_value(header, "nc", false)
     auth_data.uri = extract_header_value(header, "uri", true)
-    
-    -- RFC 7616 section 3.3: Validate request-uri matches Authorization header
-    if not auth_data.uri or auth_data.uri ~= ngx.var.request_uri then
-        ngx_log(ngx_WARN, "URI mismatch: ", auth_data.uri or "nil", " vs ", ngx.var.request_uri)
-        return nil
-    end
     
     -- RFC 7616 section 3.3: Validate request-uri matches Authorization header
     if not auth_data.uri or auth_data.uri ~= ngx.var.request_uri then
