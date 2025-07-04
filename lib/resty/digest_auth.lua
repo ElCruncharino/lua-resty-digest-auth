@@ -25,7 +25,7 @@ local ngx_DEBUG = ngx.DEBUG
 
 -- Module state
 local DigestAuth = {
-    _VERSION = '1.0.1',
+    _VERSION = '1.0.2',
     _AUTHOR = 'lua-resty-digest-auth contributors',
     _LICENSE = 'MIT'
 }
@@ -89,7 +89,7 @@ local function constant_time_compare(a, b)
 end
 
 local function validate_file_path(path)
-    if not path:match("^") then
+    if not path:match("^/") then
         return false, "Path must be absolute"
     end
     if path:match("%.%.") then
@@ -605,22 +605,22 @@ function DigestAuth.require_auth(realm)
     
     local client_ip = ngx.var.remote_addr
     
-    -- Check brute force blocking first
+    -- Check brute force blocking first (this should remain 403 as it's a security block)
     if is_brute_force_blocked(client_ip) then
         ngx_log(ngx_WARN, "Request blocked due to brute force protection from: ", client_ip)
         return ngx.exit(ngx.HTTP_FORBIDDEN)
     end
     
-    -- Check rate limiting
+    -- Check rate limiting (should return 401 with challenge, not 403)
     if not check_rate_limit(client_ip) then
-        return ngx.exit(ngx.HTTP_FORBIDDEN)
+        ngx_log(ngx_WARN, "Rate limit exceeded for: ", client_ip)
+        return send_challenge(false)
     end
     
     -- Check for authorization header
     local auth_header = ngx.var.http_authorization
     if not auth_header then
         ngx_log(ngx_DEBUG, "No authorization header from: ", client_ip)
-        increment_failed_attempts(client_ip, nil)
         return send_challenge(false)
     end
     
@@ -629,20 +629,20 @@ function DigestAuth.require_auth(realm)
     if not auth_data then
         ngx_log(ngx_WARN, "Malformed authorization header from: ", client_ip)
         increment_failed_attempts(client_ip, nil)
-        return ngx.exit(ngx.HTTP_BAD_REQUEST)
+        return send_challenge(false)
     end
     
-    -- Check for suspicious patterns
+    -- Check for suspicious patterns (should return 401 with challenge, not 403)
     local is_suspicious, pattern = detect_suspicious_pattern(auth_data, client_ip)
     if is_suspicious then
         block_client_brute_force(client_ip, pattern)
-        return ngx.exit(ngx.HTTP_FORBIDDEN)
+        return send_challenge(false)
     end
     
-    -- Check for username enumeration
+    -- Check for username enumeration (should return 401 with challenge, not 403)
     if check_username_enumeration(auth_data.username, client_ip) then
         block_client_brute_force(client_ip, "username_enumeration")
-        return ngx.exit(ngx.HTTP_FORBIDDEN)
+        return send_challenge(false)
     end
     
     -- Verify credentials

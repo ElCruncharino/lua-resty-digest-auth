@@ -108,10 +108,17 @@ jobs:
 
     - name: Install dependencies
       run: |
-        dnf update -y
-        # Remove curl-minimal to avoid conflicts with full curl package
+        # Update package cache
+        dnf update -y --refresh
+        
+        # Remove potentially conflicting packages
         dnf remove -y curl-minimal || true
-        dnf install -y --allowerasing wget curl gcc make pcre-devel openssl-devel zlib-devel
+        
+        # Install packages with conflict resolution
+        dnf install -y --allowerasing --skip-broken wget curl make pcre-devel openssl-devel zlib-devel
+        
+        # Install gcc separately with conflict resolution
+        dnf install -y --allowerasing --skip-broken gcc || dnf install -y --allowerasing --skip-broken gcc-toolset-11-gcc
 
     - name: Install OpenResty
       run: |
