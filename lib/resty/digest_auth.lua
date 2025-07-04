@@ -36,6 +36,7 @@ local DEFAULT_CONFIG = {
     nonce_lifetime = 600,      -- 10 minutes
     max_nonce_uses = 500,      -- 500 reuses per nonce
     refresh_threshold = 80,    -- Refresh at 80% usage
+    algorithm = "MD5-sess",    -- MD5-sess or SHA-256-sess per RFC 7616
     rate_limit = {
         enabled = false,
         max_attempts = 50,
@@ -128,9 +129,30 @@ local function parse_authorization_header(header)
     auth_data.username = extract_header_value(header, "username", true)
     auth_data.qop = extract_header_value(header, "qop", false)
     auth_data.realm = extract_header_value(header, "realm", true)
+    
+    -- RFC 7616 section 5.1: Username and realm must be valid UTF-8
+    local function validate_utf8(str)
+        return pcall(function() require("utf8").len(str) end)
+    end
+    
+    if not validate_utf8(auth_data.username) then
+        ngx_log(ngx_WARN, "Invalid UTF-8 in username")
+        return nil
+    end
+    
+    if not validate_utf8(auth_data.realm) then
+        ngx_log(ngx_WARN, "Invalid UTF-8 in realm")
+        return nil
+    end
     auth_data.nonce = extract_header_value(header, "nonce", true)
     auth_data.nc = extract_header_value(header, "nc", false)
     auth_data.uri = extract_header_value(header, "uri", true)
+    
+    -- RFC 7616 section 3.3: Validate request-uri matches Authorization header
+    if not auth_data.uri or auth_data.uri ~= ngx.var.request_uri then
+        ngx_log(ngx_WARN, "URI mismatch: ", auth_data.uri or "nil", " vs ", ngx.var.request_uri)
+        return nil
+    end
     auth_data.cnonce = extract_header_value(header, "cnonce", true)
     auth_data.response = extract_header_value(header, "response", true)
     auth_data.opaque = extract_header_value(header, "opaque", true)

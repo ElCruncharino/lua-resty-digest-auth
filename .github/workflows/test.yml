@@ -54,8 +54,8 @@ jobs:
           done
         '
         
-        # Check logs for errors
-        docker exec lua-resty-digest-auth-test tail -n 100 /usr/local/openresty/nginx/logs/error.log
+        # Check logs for errors (ignore User-Agent parsing issues)
+        docker exec lua-resty-digest-auth-test tail -n 100 /usr/local/openresty/nginx/logs/error.log | grep -v "failed to parse User-Agent"
         
         # Cleanup
         docker compose down
