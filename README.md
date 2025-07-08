@@ -1,5 +1,6 @@
 # lua-resty-digest-auth
 
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/be443e461a9a4dc78cf893f8aafb4034)](https://app.codacy.com/gh/ElCruncharino/lua-resty-digest-auth?utm_source=github.com&utm_medium=referral&utm_content=ElCruncharino/lua-resty-digest-auth&utm_campaign=Badge_Grade)
 [![Build Status](https://github.com/ElCruncharino/lua-resty-digest-auth/workflows/Test/badge.svg)](https://github.com/ElCruncharino/lua-resty-digest-auth/actions)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![OpenResty](https://img.shields.io/badge/OpenResty-1.19.9+-green.svg)](https://openresty.org/)
