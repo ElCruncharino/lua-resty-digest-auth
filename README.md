@@ -4,6 +4,7 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![OpenResty](https://img.shields.io/badge/OpenResty-1.19.9+-green.svg)](https://openresty.org/)
 [![OPM](https://img.shields.io/badge/OPM-Available-orange.svg)](https://opm.openresty.org/)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/f3ea099843f9455a9f95bf16b79f1fb8)](https://app.codacy.com/gh/ElCruncharino/lua-resty-digest-auth/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 
 A modern, production-ready OpenResty module for HTTP Digest Authentication with advanced security features including brute force protection, rate limiting, and suspicious pattern detection.
 
@@ -430,4 +431,4 @@ This module includes additional security mitigations beyond standard Digest Auth
 - Constant-time string comparison for authentication
 - Utility for periodic nonce cleanup
 
-These mitigations further reduce the risk of memory exhaustion, log injection, timing attacks, and key collisions.
+These mitigations further reduce the risk of memory exhaustion, log injection, timing attacks, and key collisions. 
