@@ -69,3 +69,8 @@ test/logs/
 # OPM credentials
 .opmrc 
 .aider*
+opm.exe
+upload_alpine.sh
+upload_to_opm.sh
+upload_opm.sh
+opm_upload.sh

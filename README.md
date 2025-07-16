@@ -306,6 +306,7 @@ init_by_lua_block {
 The module includes comprehensive testing options:
 
 ### Docker Testing (Recommended)
+The Docker setup provides a robust and reproducible environment for testing and development.
 ```bash
 cd test
 docker-compose up --build
@@ -429,4 +430,4 @@ This module includes additional security mitigations beyond standard Digest Auth
 - Constant-time string comparison for authentication
 - Utility for periodic nonce cleanup
 
-These mitigations further reduce the risk of memory exhaustion, log injection, timing attacks, and key collisions. 
+These mitigations further reduce the risk of memory exhaustion, log injection, timing attacks, and key collisions.

@@ -25,8 +25,8 @@ local ngx_DEBUG = ngx.DEBUG
 
 -- Module state
 local DigestAuth = {
-    _VERSION = '1.0.2',
-    _AUTHOR = 'lua-resty-digest-auth contributors',
+    _VERSION = '1.0.3',
+    _AUTHOR = 'ElCruncharino',
     _LICENSE = 'MIT'
 }
 
@@ -287,17 +287,7 @@ local function parse_credentials_line(line)
     return username, realm, ha1_hash
 end
 
-local function generate_nonce()
-    local random_data = random.bytes(64)
-    if not random_data then
-        ngx_log(ngx_ERR, "Failed to generate random data for nonce")
-        return nil, "failed to generate random data"
-    end
-
-    local entropy = random_data:sub(1, 32)
-    local nonce_salt = random_data:sub(33, 48)
-    local opaque_data = random_data:sub(49, 64)
-
+local function get_and_increment_global_counter()
     local counter = shared_memory:get("global_counter")
     if not counter then
         local initial_bytes = random.bytes(8)
@@ -316,6 +306,24 @@ local function generate_nonce()
     local new_counter, err = shared_memory:incr("global_counter", 1)
     if not new_counter then
         ngx_log(ngx_ERR, "Failed to increment global counter: ", err)
+        return nil, err
+    end
+    return new_counter
+end
+
+local function generate_nonce()
+    local random_data = random.bytes(64)
+    if not random_data then
+        ngx_log(ngx_ERR, "Failed to generate random data for nonce")
+        return nil, "failed to generate random data"
+    end
+
+    local entropy = random_data:sub(1, 32)
+    local nonce_salt = random_data:sub(33, 48)
+    local opaque_data = random_data:sub(49, 64)
+
+    local new_counter, err = get_and_increment_global_counter()
+    if not new_counter then
         return nil, err
     end
 
@@ -678,12 +686,7 @@ local function setup_server_salt()
     return true
 end
 
-function DigestAuth.configure(options)
-    local valid, err = validate_and_merge_config(options)
-    if not valid then
-        return nil, err
-    end
-    
+local function initialize_module_components()
     local success, err = initialize_shared_memory()
     if not success then
         return nil, err
@@ -697,6 +700,20 @@ function DigestAuth.configure(options)
     local users_loaded, err = load_credentials(config.credentials_file)
     if not users_loaded then
         return nil, err
+    end
+    
+    return true, users_loaded
+end
+
+function DigestAuth.configure(options)
+    local valid, err = validate_and_merge_config(options)
+    if not valid then
+        return nil, err
+    end
+    
+    local success, users_loaded = initialize_module_components()
+    if not success then
+        return nil, users_loaded -- users_loaded contains the error message here
     end
     
     ngx_log(ngx_INFO, "DigestAuth configured successfully with ", users_loaded, " users")
