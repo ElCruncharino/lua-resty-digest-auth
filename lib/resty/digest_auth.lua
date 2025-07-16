@@ -90,6 +90,53 @@ local function constant_time_compare(a, b)
     return result == 0
 end
 
+local function validate_and_merge_config(options)
+    -- Merge with defaults
+    for key, value in pairs(DEFAULT_CONFIG) do
+        if options[key] == nil then
+            options[key] = value
+        end
+    end
+    
+    config = options
+    
+    -- Validate required options
+    if not config.shared_memory_name then
+        return false, "shared_memory_name is required"
+    end
+    
+    if not config.credentials_file then
+        return false, "credentials_file is required"
+    end
+    
+    local valid_path, path_err = validate_file_path(config.credentials_file)
+    if not valid_path then
+        return false, "Invalid credentials_file: " .. (path_err or "")
+    end
+    
+    return true
+end
+
+local function initialize_shared_memory()
+    -- Initialize shared memory
+    shared_memory = ngx.shared[config.shared_memory_name]
+    if not shared_memory then
+        return false, "Shared memory '" .. config.shared_memory_name .. "' not found"
+    end
+    
+    -- Initialize rate limiting if enabled
+    if config.rate_limit.enabled then
+        local rate_limit_shm_name = config.rate_limit.shared_memory_name or "digest_auth_ratelimit"
+        rate_limit_memory = ngx.shared[rate_limit_shm_name]
+        if not rate_limit_memory then
+            ngx_log(ngx_WARN, "Rate limit shared memory '" .. rate_limit_shm_name .. "' not found, disabling rate limiting")
+            config.rate_limit.enabled = false
+        end
+    end
+    
+    return true
+end
+
 local function validate_file_path(path)
     if not path:match("^/") then
         return false, "Path must be absolute"
@@ -120,6 +167,44 @@ local function extract_header_value(header, name, quoted)
     return value and value:gsub("^%s*(.-)%s*$", "%1")
 end
 
+local function validate_utf8_field(field_name, value)
+    local function validate_utf8(str)
+        return pcall(function() require("utf8").len(str) end)
+    end
+
+    if not validate_utf8(value) then
+        ngx_log(ngx_WARN, "Invalid UTF-8 in ", field_name)
+        return false
+    end
+    return true
+end
+
+local function validate_uri_match(auth_data)
+    if not auth_data.uri or auth_data.uri ~= ngx.var.request_uri then
+        ngx_log(ngx_WARN, "URI mismatch: ", auth_data.uri or "nil", " vs ", ngx.var.request_uri)
+        return false
+    end
+    return true
+end
+
+local function validate_required_auth_fields(auth_data)
+    if not auth_data.username or not auth_data.response or not auth_data.uri or
+        not auth_data.nonce or not auth_data.realm
+    then
+        ngx_log(ngx_WARN, "Missing required authentication fields.")
+        return false
+    end
+    return true
+end
+
+local function validate_qop_fields(auth_data)
+    if auth_data.qop and (auth_data.qop ~= "auth" or not auth_data.cnonce or not auth_data.nc) then
+        ngx_log(ngx_WARN, "Invalid qop or missing cnonce/nc for qop=auth.")
+        return false
+    end
+    return true
+end
+
 local function parse_authorization_header(header)
     local prefix = "Digest "
     if header:sub(1, #prefix) ~= prefix then
@@ -130,48 +215,49 @@ local function parse_authorization_header(header)
     auth_data.username = extract_header_value(header, "username", true)
     auth_data.qop = extract_header_value(header, "qop", false)
     auth_data.realm = extract_header_value(header, "realm", true)
-    
-    -- RFC 7616 section 5.1: Username and realm must be valid UTF-8
-    local function validate_utf8(str)
-        return pcall(function() require("utf8").len(str) end)
-    end
-    
-    if not validate_utf8(auth_data.username) then
-        ngx_log(ngx_WARN, "Invalid UTF-8 in username")
-        return nil
-    end
-    
-    if not validate_utf8(auth_data.realm) then
-        ngx_log(ngx_WARN, "Invalid UTF-8 in realm")
-        return nil
-    end
     auth_data.nonce = extract_header_value(header, "nonce", true)
     auth_data.nc = extract_header_value(header, "nc", false)
     auth_data.uri = extract_header_value(header, "uri", true)
-    
-    -- RFC 7616 section 3.3: Validate request-uri matches Authorization header
-    if not auth_data.uri or auth_data.uri ~= ngx.var.request_uri then
-        ngx_log(ngx_WARN, "URI mismatch: ", auth_data.uri or "nil", " vs ", ngx.var.request_uri)
-        return nil
-    end
     auth_data.cnonce = extract_header_value(header, "cnonce", true)
     auth_data.response = extract_header_value(header, "response", true)
     auth_data.opaque = extract_header_value(header, "opaque", true)
 
-    -- Validate required fields
-    if not auth_data.username or not auth_data.response or not auth_data.uri or
-        not auth_data.nonce or not auth_data.realm
-    then
-        return nil
-    end
-
-    -- Validate qop if present
-    if auth_data.qop and (auth_data.qop ~= "auth" or not auth_data.cnonce or not auth_data.nc)
-    then
-        return nil
-    end
+    if not validate_utf8_field("username", auth_data.username) then return nil end
+    if not validate_utf8_field("realm", auth_data.realm) then return nil end
+    if not validate_uri_match(auth_data) then return nil end
+    if not validate_required_auth_fields(auth_data) then return nil end
+    if not validate_qop_fields(auth_data) then return nil end
 
     return auth_data
+end
+
+local function load_credentials(file_path)
+    local file, err = io.open(file_path, "r")
+    if not file then
+        return nil, "Failed to open credentials file: " .. err
+    end
+    
+    local users_loaded = 0
+    for line in file:lines() do
+        local username, realm, ha1_hash = parse_credentials_line(line)
+        if username then
+            user_credentials[username] = {
+                realm = realm,
+                ha1_hash = ha1_hash
+            }
+            ngx_log(ngx_DEBUG, "Loaded user: ", username, " (realm: ", realm, ")")
+            users_loaded = users_loaded + 1
+        else
+            ngx_log(ngx_WARN, "Invalid credentials line: ", line)
+        end
+    end
+    
+    file:close()
+    
+    if users_loaded == 0 then
+        return nil, "No valid users found in credentials file"
+    end
+    return users_loaded
 end
 
 local function parse_credentials_line(line)
@@ -405,6 +491,36 @@ local function increment_failed_attempts(client_ip, username)
     end
 end
 
+local function log_suspicious_pattern(client_ip, pattern_name)
+    ngx_log(ngx_WARN, "Suspicious pattern detected: ", pattern_name, " from ", sanitize_log_value(client_ip))
+end
+
+local function check_empty_credentials(auth_data, client_ip, patterns)
+    if patterns.empty_credentials and (not auth_data.username or auth_data.username == "") then
+        log_suspicious_pattern(client_ip, "empty_credentials")
+        return true, "empty_credentials"
+    end
+    return false
+end
+
+local function check_malformed_headers(auth_data, client_ip, patterns)
+    if patterns.malformed_headers and not auth_data.response then
+        log_suspicious_pattern(client_ip, "malformed_headers")
+        return true, "malformed_headers"
+    end
+    return false
+end
+
+local function check_rapid_requests(client_ip, patterns)
+    local rapid_key = "rapid_requests:" .. sanitize_key(client_ip)
+    local rapid_count, err = rate_limit_memory:incr(rapid_key, 1, 1) -- 1 second window
+    if rapid_count and rapid_count > patterns.rapid_requests then
+        log_suspicious_pattern(client_ip, "rapid_requests")
+        return true, "rapid_requests"
+    end
+    return false
+end
+
 local function detect_suspicious_pattern(auth_data, client_ip)
     if not config.brute_force.enabled then
         return false
@@ -412,25 +528,14 @@ local function detect_suspicious_pattern(auth_data, client_ip)
     
     local patterns = config.brute_force.suspicious_patterns
     
-    -- Check for empty credentials
-    if patterns.empty_credentials and (not auth_data.username or auth_data.username == "") then
-        ngx_log(ngx_WARN, "Suspicious pattern detected: empty username from ", sanitize_log_value(client_ip))
-        return true, "empty_credentials"
-    end
+    local is_suspicious, pattern = check_empty_credentials(auth_data, client_ip, patterns)
+    if is_suspicious then return true, pattern end
     
-    -- Check for malformed headers (basic check)
-    if patterns.malformed_headers and not auth_data.response then
-        ngx_log(ngx_WARN, "Suspicious pattern detected: malformed auth header from ", sanitize_log_value(client_ip))
-        return true, "malformed_headers"
-    end
+    is_suspicious, pattern = check_malformed_headers(auth_data, client_ip, patterns)
+    if is_suspicious then return true, pattern end
     
-    -- Check for rapid requests (basic implementation)
-    local rapid_key = "rapid_requests:" .. sanitize_key(client_ip)
-    local rapid_count, err = rate_limit_memory:incr(rapid_key, 1, 1) -- 1 second window
-    if rapid_count and rapid_count > patterns.rapid_requests then
-        ngx_log(ngx_WARN, "Suspicious pattern detected: rapid requests from ", sanitize_log_value(client_ip))
-        return true, "rapid_requests"
-    end
+    is_suspicious, pattern = check_rapid_requests(client_ip, patterns)
+    if is_suspicious then return true, pattern end
     
     return false
 end
@@ -451,10 +556,45 @@ local function check_username_enumeration(username, client_ip)
     return false
 end
 
-local function verify_credentials(auth_data)
+local function check_user_and_realm(auth_data)
     local user_creds = user_credentials[auth_data.username]
     if not user_creds or user_creds.realm ~= auth_data.realm then
         ngx_log(ngx_WARN, "User not found or realm mismatch: ", sanitize_log_value(auth_data.username))
+        return false
+    end
+    return true
+end
+
+local function check_opaque_match(auth_data, nonce_metadata)
+    if auth_data.opaque and nonce_metadata and nonce_metadata.opaque then
+        if auth_data.opaque ~= nonce_metadata.opaque then
+            ngx_log(ngx_WARN, "Opaque mismatch for user: ", sanitize_log_value(auth_data.username))
+            return false
+        end
+    end
+    return true
+end
+
+local function calculate_expected_response(auth_data, ha1)
+    local ha2 = ngx.md5(tab_concat({ngx.req.get_method(), auth_data.uri}, ":"))
+    if auth_data.qop then
+        return ngx.md5(tab_concat({ha1, auth_data.nonce, auth_data.nc, auth_data.cnonce,
+                                   auth_data.qop, ha2}, ":"))
+    else
+        return ngx.md5(tab_concat({ha1, auth_data.nonce, ha2}, ":"))
+    end
+end
+
+local function check_nonce_refresh(nonce_metadata, auth_data_username)
+    if nonce_metadata and nonce_metadata.uses >= (config.max_nonce_uses * config.refresh_threshold / 100) then
+        ngx_log(ngx_DEBUG, "Nonce usage near limit, refreshing for user: ", sanitize_log_value(auth_data_username))
+        return true
+    end
+    return false
+end
+
+local function verify_credentials(auth_data)
+    if not check_user_and_realm(auth_data) then
         return false, false
     end
 
@@ -464,38 +604,45 @@ local function verify_credentials(auth_data)
         return false, true
     end
 
-    -- Verify opaque if provided
-    if auth_data.opaque and nonce_metadata and nonce_metadata.opaque then
-        if auth_data.opaque ~= nonce_metadata.opaque then
-            ngx_log(ngx_WARN, "Opaque mismatch for user: ", sanitize_log_value(auth_data.username))
-            return false, false
-        end
+    if not check_opaque_match(auth_data, nonce_metadata) then
+        return false, false
     end
 
-    -- Calculate expected response
-    local ha2 = ngx.md5(tab_concat({ngx.req.get_method(), auth_data.uri}, ":"))
-    local ha1 = user_creds.ha1_hash
-    local expected_response
-
-    if auth_data.qop then
-        expected_response = ngx.md5(tab_concat({ha1, auth_data.nonce, auth_data.nc, auth_data.cnonce,
-                                               auth_data.qop, ha2}, ":"))
-    else
-        expected_response = ngx.md5(tab_concat({ha1, auth_data.nonce, ha2}, ":"))
-    end
+    local ha1 = user_credentials[auth_data.username].ha1_hash
+    local expected_response = calculate_expected_response(auth_data, ha1)
 
     if not constant_time_compare(expected_response, auth_data.response) then
         ngx_log(ngx_WARN, "Invalid authentication attempt")
         return false, false
     end
 
-    -- Check if nonce needs refresh
-    if nonce_metadata and nonce_metadata.uses >= (config.max_nonce_uses * config.refresh_threshold / 100) then
-        ngx_log(ngx_DEBUG, "Nonce usage near limit, refreshing for user: ", sanitize_log_value(auth_data.username))
+    if check_nonce_refresh(nonce_metadata, auth_data.username) then
         return false, true
     end
 
     return true, false
+end
+
+local function get_opaque_from_nonce_metadata(nonce_key, nonce)
+    local encoded_metadata = shared_memory:get(nonce_key)
+    if encoded_metadata then
+        local ok, metadata = pcall(cjson.decode, encoded_metadata)
+        if ok and metadata and metadata.opaque then
+            return metadata.opaque
+        else
+            ngx_log(ngx_WARN, "Failed to decode nonce metadata or missing opaque for: ", nonce)
+        end
+    end
+    return nil
+end
+
+local function generate_fallback_opaque(nonce)
+    local fallback_opaque_bytes = random.bytes(16)
+    if fallback_opaque_bytes then
+        ngx_log(ngx_WARN, "Using fallback opaque for nonce: ", nonce)
+        return ngx.encode_base64(fallback_opaque_bytes)
+    end
+    return ""
 end
 
 local function send_challenge(stale)
@@ -505,27 +652,7 @@ local function send_challenge(stale)
     end
 
     local nonce_key = "nonce:" .. sanitize_key(nonce)
-    local encoded_metadata = shared_memory:get(nonce_key)
-    local opaque = ""
-    
-    if encoded_metadata then
-        local ok, metadata = pcall(cjson.decode, encoded_metadata)
-        if ok and metadata and metadata.opaque then
-            opaque = metadata.opaque
-        else
-            local fallback_opaque = random.bytes(16)
-            if fallback_opaque then
-                opaque = ngx.encode_base64(fallback_opaque)
-                ngx_log(ngx_WARN, "Using fallback opaque for nonce: ", nonce)
-            end
-        end
-    else
-        local fallback_opaque = random.bytes(16)
-        if fallback_opaque then
-            opaque = ngx.encode_base64(fallback_opaque)
-            ngx_log(ngx_WARN, "Using fallback opaque for nonce: ", nonce)
-        end
-    end
+    local opaque = get_opaque_from_nonce_metadata(nonce_key, nonce) or generate_fallback_opaque(nonce)
 
     local challenge_header = tab_concat {
         "Digest ",
@@ -542,82 +669,71 @@ local function send_challenge(stale)
 end
 
 -- Public API
-function DigestAuth.configure(options)
-    -- Merge with defaults
-    for key, value in pairs(DEFAULT_CONFIG) do
-        if options[key] == nil then
-            options[key] = value
-        end
-    end
-    
-    config = options
-    
-    -- Validate required options
-    if not config.shared_memory_name then
-        return nil, "shared_memory_name is required"
-    end
-    
-    if not config.credentials_file then
-        return nil, "credentials_file is required"
-    end
-    
-    local valid_path, path_err = validate_file_path(config.credentials_file)
-    if not valid_path then
-        return nil, "Invalid credentials_file: " .. (path_err or "")
-    end
-    
-    -- Initialize shared memory
-    shared_memory = ngx.shared[config.shared_memory_name]
-    if not shared_memory then
-        return nil, "Shared memory '" .. config.shared_memory_name .. "' not found"
-    end
-    
-    -- Initialize rate limiting if enabled
-    if config.rate_limit.enabled then
-        local rate_limit_shm_name = config.rate_limit.shared_memory_name or "digest_auth_ratelimit"
-        rate_limit_memory = ngx.shared[rate_limit_shm_name]
-        if not rate_limit_memory then
-            ngx_log(ngx_WARN, "Rate limit shared memory '" .. rate_limit_shm_name .. "' not found, disabling rate limiting")
-            config.rate_limit.enabled = false
-        end
-    end
-    
-    -- Generate server salt
+local function setup_server_salt()
     local salt_bytes = random.bytes(16)
     if not salt_bytes then
         return nil, "Failed to generate server salt"
     end
     server_salt = ngx.encode_base64(salt_bytes)
-    
-    -- Load user credentials
-    local file, err = io.open(config.credentials_file, "r")
-    if not file then
-        return nil, "Failed to open credentials file: " .. err
+    return true
+end
+
+function DigestAuth.configure(options)
+    local valid, err = validate_and_merge_config(options)
+    if not valid then
+        return nil, err
     end
     
-    local users_loaded = 0
-    for line in file:lines() do
-        local username, realm, ha1_hash = parse_credentials_line(line)
-        if username then
-            user_credentials[username] = {
-                realm = realm,
-                ha1_hash = ha1_hash
-            }
-            ngx_log(ngx_DEBUG, "Loaded user: ", username, " (realm: ", realm, ")")
-            users_loaded = users_loaded + 1
-        else
-            ngx_log(ngx_WARN, "Invalid credentials line: ", line)
-        end
+    local success, err = initialize_shared_memory()
+    if not success then
+        return nil, err
     end
     
-    file:close()
+    success, err = setup_server_salt()
+    if not success then
+        return nil, err
+    end
     
-    if users_loaded == 0 then
-        return nil, "No valid users found in credentials file"
+    local users_loaded, err = load_credentials(config.credentials_file)
+    if not users_loaded then
+        return nil, err
     end
     
     ngx_log(ngx_INFO, "DigestAuth configured successfully with ", users_loaded, " users")
     return true
+end
+
+local function handle_auth_failure(client_ip, auth_data, stale)
+    increment_failed_attempts(client_ip, auth_data and auth_data.username or nil)
+    return send_challenge(stale)
+end
+
+local function handle_brute_force_block(client_ip, reason)
+    ngx_log(ngx_WARN, "Request blocked due to brute force protection from: ", client_ip)
+    block_client_brute_force(client_ip, reason)
+    return ngx.exit(ngx.HTTP_FORBIDDEN)
+end
+
+local function handle_rate_limit_exceeded(client_ip)
+    ngx_log(ngx_WARN, "Rate limit exceeded for: ", client_ip)
+    return send_challenge(false)
+end
+
+local function handle_suspicious_pattern(auth_data, client_ip)
+    local is_suspicious, pattern = detect_suspicious_pattern(auth_data, client_ip)
+    if is_suspicious then
+        block_client_brute_force(client_ip, pattern)
+        return true
+    end
+    return false
+end
+
+local function handle_username_enumeration(auth_data, client_ip)
+    if check_username_enumeration(auth_data.username, client_ip) then
+        block_client_brute_force(client_ip, "username_enumeration")
+        return true
+    end
+    return false
 end
 
 function DigestAuth.require_auth(realm)
@@ -628,57 +744,41 @@ function DigestAuth.require_auth(realm)
     
     local client_ip = ngx.var.remote_addr
     
-    -- Check brute force blocking first (this should remain 403 as it's a security block)
     if is_brute_force_blocked(client_ip) then
-        ngx_log(ngx_WARN, "Request blocked due to brute force protection from: ", client_ip)
-        return ngx.exit(ngx.HTTP_FORBIDDEN)
+        return handle_brute_force_block(client_ip, "brute_force_block")
     end
     
-    -- Check rate limiting (should return 401 with challenge, not 403)
     if not check_rate_limit(client_ip) then
-        ngx_log(ngx_WARN, "Rate limit exceeded for: ", client_ip)
-        return send_challenge(false)
+        return handle_rate_limit_exceeded(client_ip)
     end
     
-    -- Check for authorization header
     local auth_header = ngx.var.http_authorization
     if not auth_header then
         ngx_log(ngx_DEBUG, "No authorization header from: ", client_ip)
         return send_challenge(false)
     end
     
-    -- Parse authorization header
     local auth_data = parse_authorization_header(auth_header)
     if not auth_data then
         ngx_log(ngx_WARN, "Malformed authorization header from: ", client_ip)
-        increment_failed_attempts(client_ip, nil)
+        return handle_auth_failure(client_ip, nil, false)
+    end
+    
+    if handle_suspicious_pattern(auth_data, client_ip) then
         return send_challenge(false)
     end
     
-    -- Check for suspicious patterns (should return 401 with challenge, not 403)
-    local is_suspicious, pattern = detect_suspicious_pattern(auth_data, client_ip)
-    if is_suspicious then
-        block_client_brute_force(client_ip, pattern)
+    if handle_username_enumeration(auth_data, client_ip) then
         return send_challenge(false)
     end
     
-    -- Check for username enumeration (should return 401 with challenge, not 403)
-    if check_username_enumeration(auth_data.username, client_ip) then
-        block_client_brute_force(client_ip, "username_enumeration")
-        return send_challenge(false)
-    end
-    
-    -- Verify credentials
     local success, stale = verify_credentials(auth_data)
     if not success then
-        increment_failed_attempts(client_ip, auth_data.username)
-        return send_challenge(stale)
+        return handle_auth_failure(client_ip, auth_data, stale)
     end
     
-    -- Authentication successful
     reset_rate_limit(client_ip)
     ngx_log(ngx_INFO, "Authentication successful for user: ", sanitize_log_value(auth_data.username), " from: ", sanitize_log_value(client_ip))
-    -- Don't exit here - let the request continue to the next phase
     return
 end
 

@@ -3,7 +3,6 @@
 # Performance testing script for lua-resty-digest-auth
 BASE_URL="http://localhost:8080"
 CONCURRENT_REQUESTS=50
-TOTAL_REQUESTS=1000
 
 echo "🚀 Performance Testing lua-resty-digest-auth module"
 echo "=================================================="

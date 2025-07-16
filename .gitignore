@@ -68,3 +68,4 @@ test/logs/
 
 # OPM credentials
 .opmrc 
+.aider*

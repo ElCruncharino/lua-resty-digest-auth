@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2025-07-01
+
+### Fixed
+- **Critical Bug Fix**: Fixed brute force protection logic that was incorrectly blocking legitimate users
+  - Removed incorrect counting of missing Authorization headers as "failed attempts"
+  - Now only counts actual authentication failures (wrong credentials) as failed attempts
+  - First-time visitors and legitimate users no longer get blocked for normal browsing behavior
+  - Maintains security against actual brute force attacks while being user-friendly
+  - This was causing legitimate users to be blocked after visiting the site multiple times
+
 ## [1.0.1] - 2025-06-29
 
 ### Fixed

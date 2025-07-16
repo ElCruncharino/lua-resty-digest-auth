@@ -5,23 +5,23 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV OPENRESTY_VERSION=1.21.4.1
 
 # Install dependencies
-RUN apt-get update && apt-get install -y \
-    wget \
-    curl \
-    build-essential \
-    libpcre3-dev \
-    libssl-dev \
-    zlib1g-dev \
-    ca-certificates \
-    gnupg \
-    lsb-release \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget=1.20.3 \
+    curl=7.68.0 \
+    build-essential=12.8 \
+    libpcre3-dev=2:8.39-12 \
+    libssl-dev=1.1.1f-1ubuntu2.20 \
+    zlib1g-dev=1:1.2.11.dfsg-2ubuntu1.5 \
+    ca-certificates=20210119~20.04.2 \
+    gnupg=2.2.19-3ubuntu2.2 \
+    lsb-release=11.1.0ubuntu2.4 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install OpenResty
 RUN wget -qO - https://openresty.org/package/pubkey.gpg | apt-key add - \
     && echo "deb http://openresty.org/package/ubuntu $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/openresty.list \
     && apt-get update \
-    && apt-get install -y openresty \
+    && apt-get install -y --no-install-recommends openresty=${OPENRESTY_VERSION} \
     && rm -rf /var/lib/apt/lists/*
 
 # Create necessary directories
