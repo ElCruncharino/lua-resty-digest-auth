@@ -25,7 +25,7 @@ local ngx_DEBUG = ngx.DEBUG
 
 -- Module state
 local DigestAuth = {
-    _VERSION = "1.0.1",
+    _VERSION = "1.0.3",
     _AUTHOR = "ElCruncharino",
     _LICENSE = "MIT",
 }
