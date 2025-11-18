@@ -35,7 +35,8 @@ done
 # Test 3: Stale nonce handling
 echo -e "\n3. Testing stale nonce handling..."
 echo "   Getting challenge..."
-STALE_NONCE=$(curl -s -D - "$BASE_URL/protected/" | grep -i "www-authenticate" | grep -o 'nonce="[^"]*"' | cut -d'"' -f2)
+NONCE=$(curl -s -D - "$BASE_URL/protected/" | grep -i "www-authenticate" | grep -o 'nonce="[^"]*"' | cut -d'"' -f2)
+echo "   Nonce: ${NONCE:0:20}..."
 echo "   Waiting 5 seconds for potential nonce expiration..."
 sleep 5
 echo "   Attempting to use potentially stale nonce..."
