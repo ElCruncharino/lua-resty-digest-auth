@@ -7,6 +7,17 @@ on:
     branches: [ main, master ]
 
 jobs:
+  lint:
+    name: Lint with StyLua
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: JohnnyMorganz/stylua-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: latest
+          args: --check lib/
+
   test:
     runs-on: ubuntu-latest
     
@@ -36,21 +47,36 @@ jobs:
         fi
         
         # Run additional exhaustive tests
-        docker cp test_digest_auth_exhaustive.sh lua-resty-digest-auth-test:/tmp/
-        docker exec lua-resty-digest-auth-test bash -c 'chmod +x /tmp/test_digest_auth_exhaustive.sh && /tmp/test_digest_auth_exhaustive.sh'
+        docker cp exhaustive_auth_test.sh lua-resty-digest-auth-test:/tmp/
+        docker exec lua-resty-digest-auth-test bash -c 'chmod +x /tmp/exhaustive_auth_test.sh && /tmp/exhaustive_auth_test.sh'
+
+        # Run advanced tests
+        echo "Running advanced tests..."
+        docker cp advanced_test.sh lua-resty-digest-auth-test:/tmp/
+        docker exec lua-resty-digest-auth-test bash -c 'chmod +x /tmp/advanced_test.sh && /tmp/advanced_test.sh'
+
+        # Run memory management tests
+        echo "Running memory management tests..."
+        docker cp memory_management_test.sh lua-resty-digest-auth-test:/tmp/
+        docker exec lua-resty-digest-auth-test bash -c 'chmod +x /tmp/memory_management_test.sh && /tmp/memory_management_test.sh'
+
+        # Run brute force protection tests
+        echo "Running brute force protection tests..."
+        docker cp brute_force_test.sh lua-resty-digest-auth-test:/tmp/
+        docker exec lua-resty-digest-auth-test bash -c 'chmod +x /tmp/brute_force_test.sh && /tmp/brute_force_test.sh'
         
         # Performance tests
         echo "Running performance tests..."
         docker exec lua-resty-digest-auth-test bash -c '
           # Test concurrent requests
           for i in {1..10}; do
-            curl -s -u "alice:password123" http://localhost:8080/protected/ > /dev/null &
+            curl -s --digest -u "alice:password123" http://localhost:8080/protected/ > /dev/null &
           done
           wait
-          
+
           # Test rate limiting
           for i in {1..15}; do
-            curl -s -u "alice:wrongpass" http://localhost:8080/protected/ > /dev/null
+            curl -s --digest -u "alice:wrongpass" http://localhost:8080/protected/ > /dev/null
           done
         '
         
@@ -85,12 +111,12 @@ jobs:
         docker exec lua-resty-digest-auth-test bash -c '
           # Try common passwords
           for pass in password 123456 admin root test; do
-            curl -s -u "alice:$pass" http://localhost:8080/protected/ > /dev/null
+            curl -s --digest -u "alice:$pass" http://localhost:8080/protected/ > /dev/null
           done
-          
+
           # Try empty credentials
-          curl -s -u ":" http://localhost:8080/protected/ > /dev/null
-          
+          curl -s --digest -u ":" http://localhost:8080/protected/ > /dev/null
+
           # Try malformed auth headers
           curl -s -H "Authorization: Basic invalid" http://localhost:8080/protected/ > /dev/null
           curl -s -H "Authorization: Digest invalid" http://localhost:8080/protected/ > /dev/null
@@ -148,9 +174,9 @@ jobs:
         echo "=== END DEBUGGING ==="
         
         cat > /tmp/htdigest << 'EOF'
-        alice:Test Realm:5f4dcc3b5aa765d61d8327deb882cf99
-        bob:Test Realm:7c4a8d09ca3762af61e59520943dc26494f8941b
-        admin:Admin Area:21232f297a57a5a743894a0e4a801fc3
+        alice:Test Realm:49e8d18599d46ed533eb6f4ca0325170
+        bob:Test Realm:357db14c909f66b39af570a770703768
+        admin:Test Realm:812262381af0c3906de59b610343dfdf
         EOF
         cp /tmp/htdigest /etc/nginx/htdigest
         echo "=== SETUP STEP COMPLETED ==="
@@ -312,10 +338,9 @@ jobs:
         CHALLENGE_RESPONSE=$(curl -s -D - http://localhost:8080/protected/ | grep -i "www-authenticate")
         echo "Challenge response: $CHALLENGE_RESPONSE"
         
-        # For now, just test that unauthenticated requests return 401
-        # We'll implement proper digest auth testing later
-        AUTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" -u "alice:password123" http://localhost:8080/protected/)
-        echo "Protected (with basic auth - should fail): $AUTH_CODE"
+        # Test with digest auth
+        AUTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" --digest -u "alice:password123" http://localhost:8080/protected/)
+        echo "Protected (with digest auth): $AUTH_CODE"
         
         # Debug: Check nginx logs
         echo "=== NGINX ERROR LOG ==="
@@ -339,8 +364,8 @@ jobs:
           exit 1
         fi
         
-        if [ "$AUTH_CODE" != "400" ]; then
-          echo "❌ Protected endpoint with basic auth failed: expected 400, got $AUTH_CODE"
+        if [ "$AUTH_CODE" != "200" ]; then
+          echo "❌ Protected endpoint with digest auth failed: expected 200, got $AUTH_CODE"
           exit 1
         fi
         
