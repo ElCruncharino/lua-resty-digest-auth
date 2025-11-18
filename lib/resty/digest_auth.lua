@@ -111,6 +111,22 @@ local function extract_header_value(header, name, quoted)
     return value and value:gsub("^%s*(.-)%s*$", "%1")
 end
 
+local function validate_auth_fields(auth_data)
+    -- Check required fields
+    if not (auth_data.username and auth_data.response and auth_data.uri and auth_data.nonce and auth_data.realm) then
+        return false
+    end
+
+    -- Validate qop if present
+    if auth_data.qop then
+        if auth_data.qop ~= "auth" or not auth_data.cnonce or not auth_data.nc then
+            return false
+        end
+    end
+
+    return true
+end
+
 local function parse_authorization_header(header)
     local prefix = "Digest "
     if header:sub(1, #prefix) ~= prefix then
@@ -128,19 +144,7 @@ local function parse_authorization_header(header)
     auth_data.response = extract_header_value(header, "response", true)
     auth_data.opaque = extract_header_value(header, "opaque", true)
 
-    -- Validate required fields
-    if
-        not auth_data.username
-        or not auth_data.response
-        or not auth_data.uri
-        or not auth_data.nonce
-        or not auth_data.realm
-    then
-        return nil
-    end
-
-    -- Validate qop if present
-    if auth_data.qop and (auth_data.qop ~= "auth" or not auth_data.cnonce or not auth_data.nc) then
+    if not validate_auth_fields(auth_data) then
         return nil
     end
 
@@ -392,31 +396,53 @@ local function increment_failed_attempts(client_ip, username)
     end
 end
 
+local function check_empty_credentials(auth_data, client_ip, patterns)
+    if patterns.empty_credentials and (not auth_data.username or auth_data.username == "") then
+        ngx_log(ngx_WARN, "Suspicious pattern detected: empty username from ", sanitize_log_value(client_ip))
+        return true, "empty_credentials"
+    end
+    return false
+end
+
+local function check_malformed_headers(auth_data, client_ip, patterns)
+    if patterns.malformed_headers and not auth_data.response then
+        ngx_log(ngx_WARN, "Suspicious pattern detected: malformed auth header from ", sanitize_log_value(client_ip))
+        return true, "malformed_headers"
+    end
+    return false
+end
+
+local function check_rapid_requests(client_ip, patterns)
+    local rapid_key = "rapid_requests:" .. sanitize_key(client_ip)
+    local rapid_count = rate_limit_memory:incr(rapid_key, 1, 1)
+    if rapid_count and rapid_count > patterns.rapid_requests then
+        ngx_log(ngx_WARN, "Suspicious pattern detected: rapid requests from ", sanitize_log_value(client_ip))
+        return true, "rapid_requests"
+    end
+    return false
+end
+
 local function detect_suspicious_pattern(auth_data, client_ip)
     if not config.brute_force.enabled then
         return false
     end
 
     local patterns = config.brute_force.suspicious_patterns
+    local is_suspicious, reason
 
-    -- Check for empty credentials
-    if patterns.empty_credentials and (not auth_data.username or auth_data.username == "") then
-        ngx_log(ngx_WARN, "Suspicious pattern detected: empty username from ", sanitize_log_value(client_ip))
-        return true, "empty_credentials"
+    is_suspicious, reason = check_empty_credentials(auth_data, client_ip, patterns)
+    if is_suspicious then
+        return true, reason
     end
 
-    -- Check for malformed headers (basic check)
-    if patterns.malformed_headers and not auth_data.response then
-        ngx_log(ngx_WARN, "Suspicious pattern detected: malformed auth header from ", sanitize_log_value(client_ip))
-        return true, "malformed_headers"
+    is_suspicious, reason = check_malformed_headers(auth_data, client_ip, patterns)
+    if is_suspicious then
+        return true, reason
     end
 
-    -- Check for rapid requests (basic implementation)
-    local rapid_key = "rapid_requests:" .. sanitize_key(client_ip)
-    local rapid_count, err = rate_limit_memory:incr(rapid_key, 1, 1) -- 1 second window
-    if rapid_count and rapid_count > patterns.rapid_requests then
-        ngx_log(ngx_WARN, "Suspicious pattern detected: rapid requests from ", sanitize_log_value(client_ip))
-        return true, "rapid_requests"
+    is_suspicious, reason = check_rapid_requests(client_ip, patterns)
+    if is_suspicious then
+        return true, reason
     end
 
     return false
@@ -492,35 +518,34 @@ local function verify_credentials(auth_data)
     return true, false
 end
 
+local function get_opaque_for_nonce(nonce)
+    local nonce_key = "nonce:" .. sanitize_key(nonce)
+    local encoded_metadata = shared_memory:get(nonce_key)
+
+    if encoded_metadata then
+        local ok, metadata = pcall(cjson.decode, encoded_metadata)
+        if ok and metadata and metadata.opaque then
+            return metadata.opaque
+        end
+    end
+
+    -- Generate fallback opaque
+    local fallback_opaque = random.bytes(16)
+    if fallback_opaque then
+        ngx_log(ngx_WARN, "Using fallback opaque for nonce: ", nonce)
+        return ngx.encode_base64(fallback_opaque)
+    end
+
+    return ""
+end
+
 local function send_challenge(stale)
     local nonce = generate_nonce()
     if not nonce then
         return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
     end
 
-    local nonce_key = "nonce:" .. sanitize_key(nonce)
-    local encoded_metadata = shared_memory:get(nonce_key)
-    local opaque = ""
-
-    if encoded_metadata then
-        local ok, metadata = pcall(cjson.decode, encoded_metadata)
-        if ok and metadata and metadata.opaque then
-            opaque = metadata.opaque
-        else
-            local fallback_opaque = random.bytes(16)
-            if fallback_opaque then
-                opaque = ngx.encode_base64(fallback_opaque)
-                ngx_log(ngx_WARN, "Using fallback opaque for nonce: ", nonce)
-            end
-        end
-    else
-        local fallback_opaque = random.bytes(16)
-        if fallback_opaque then
-            opaque = ngx.encode_base64(fallback_opaque)
-            ngx_log(ngx_WARN, "Using fallback opaque for nonce: ", nonce)
-        end
-    end
-
+    local opaque = get_opaque_for_nonce(nonce)
     local challenge_header = tab_concat({
         "Digest ",
         'realm="',
