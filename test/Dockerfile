@@ -1,28 +1,9 @@
-FROM ubuntu:20.04
-
-# Set environment variables
-ENV DEBIAN_FRONTEND=noninteractive
-ENV OPENRESTY_VERSION=1.21.4.1
+FROM openresty/openresty:alpine-slim
 
 # Install dependencies
-RUN apt-get update && apt-get install -y \
-    wget \
+RUN apk add --no-cache \
     curl \
-    build-essential \
-    libpcre3-dev \
-    libssl-dev \
-    zlib1g-dev \
-    ca-certificates \
-    gnupg \
-    lsb-release \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install OpenResty
-RUN wget -qO - https://openresty.org/package/pubkey.gpg | apt-key add - \
-    && echo "deb http://openresty.org/package/ubuntu $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/openresty.list \
-    && apt-get update \
-    && apt-get install -y openresty \
-    && rm -rf /var/lib/apt/lists/*
+    bash
 
 # Create necessary directories
 RUN mkdir -p /usr/local/openresty/nginx/logs \
@@ -33,18 +14,24 @@ RUN mkdir -p /usr/local/openresty/nginx/logs \
 # Copy the module
 COPY lib/resty/digest_auth.lua /usr/local/openresty/lualib/resty/
 
-# Create test credentials
-RUN echo "alice:Test Realm:5f4dcc3b5aa765d61d8327deb882cf99" > /etc/nginx/htdigest \
-    && echo "bob:Test Realm:7c4a8d09ca3762af61e59520943dc26494f8941b" >> /etc/nginx/htdigest \
-    && echo "admin:Admin Area:21232f297a57a5a743894a0e4a801fc3" >> /etc/nginx/htdigest \
+# Create test credentials (HA1 = MD5(username:realm:password))
+# alice:password123, bob:password456, admin:adminpass
+RUN echo "alice:Test Realm:49e8d18599d46ed533eb6f4ca0325170" > /etc/nginx/htdigest \
+    && echo "bob:Test Realm:357db14c909f66b39af570a770703768" >> /etc/nginx/htdigest \
+    && echo "admin:Test Realm:812262381af0c3906de59b610343dfdf" >> /etc/nginx/htdigest \
     && chmod 644 /etc/nginx/htdigest
 
 # Create nginx configuration
 COPY test/nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
 
-# Create test script
-COPY test/test_digest_auth.sh /usr/local/bin/test_digest_auth
-RUN chmod +x /usr/local/bin/test_digest_auth
+# Copy all test scripts
+COPY test/basic_auth_test.sh /usr/local/bin/basic_auth_test
+COPY test/advanced_test.sh /usr/local/bin/advanced_test
+COPY test/memory_management_test.sh /usr/local/bin/memory_management_test
+COPY test/brute_force_test.sh /usr/local/bin/brute_force_test
+COPY test/exhaustive_auth_test.sh /usr/local/bin/exhaustive_auth_test
+COPY test/production_test.sh /usr/local/bin/production_test
+RUN chmod +x /usr/local/bin/*_test /usr/local/bin/*_auth_test /usr/local/bin/production_test
 
 # Create start script
 COPY test/start.sh /usr/local/bin/start.sh
