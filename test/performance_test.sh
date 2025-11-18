@@ -3,7 +3,6 @@
 # Performance testing script for lua-resty-digest-auth
 BASE_URL="http://localhost:8080"
 CONCURRENT_REQUESTS=50
-TOTAL_REQUESTS=1000
 
 echo "🚀 Performance Testing lua-resty-digest-auth module"
 echo "=================================================="
@@ -47,7 +46,7 @@ echo "   Completed 100 mixed requests in ${duration}s (${rps} req/s)"
 # Test 4: Public endpoint performance (baseline)
 echo -e "\n4. Testing public endpoint performance (baseline)..."
 start_time=$(date +%s.%N)
-for i in $(seq 1 100); do
+for _ in $(seq 1 100); do
     curl -s "$BASE_URL/" > /dev/null
 done
 end_time=$(date +%s.%N)
