@@ -33,7 +33,7 @@ echo "   Completed 100 sequential requests in ${duration}s (${rps} req/s)"
 # Test 3: Mixed valid/invalid authentication requests
 echo -e "\n3. Testing mixed valid/invalid authentication requests..."
 start_time=$(date +%s.%N)
-for i in $(seq 1 50); do
+for _ in $(seq 1 50); do
     curl -s -u "alice:password123" "$BASE_URL/protected/" > /dev/null &
     curl -s -u "alice:wrongpass" "$BASE_URL/protected/" > /dev/null &
 done
