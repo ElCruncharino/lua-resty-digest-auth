@@ -67,4 +67,4 @@ test/logs/
 .dockerignore
 
 # OPM credentials
-.opmrc 
+.opmrc stylua
