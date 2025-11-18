@@ -22,7 +22,7 @@ echo "   Completed $CONCURRENT_REQUESTS concurrent requests in ${duration}s (${r
 # Test 2: Sequential valid authentication requests
 echo -e "\n2. Testing sequential valid authentication requests..."
 start_time=$(date +%s.%N)
-for i in $(seq 1 100); do
+for _ in $(seq 1 100); do
     curl -s -u "alice:password123" "$BASE_URL/protected/" > /dev/null
 done
 end_time=$(date +%s.%N)

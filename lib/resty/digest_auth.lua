@@ -113,15 +113,16 @@ end
 
 local function validate_auth_fields(auth_data)
     -- Check required fields
-    if not (auth_data.username and auth_data.response and auth_data.uri and auth_data.nonce and auth_data.realm) then
-        return false
-    end
-
-    -- Validate qop if present
-    if auth_data.qop then
-        if auth_data.qop ~= "auth" or not auth_data.cnonce or not auth_data.nc then
+    local required_fields = { auth_data.username, auth_data.response, auth_data.uri, auth_data.nonce, auth_data.realm }
+    for _, field in ipairs(required_fields) do
+        if not field then
             return false
         end
+    end
+
+    -- Validate qop requirements
+    if auth_data.qop and (auth_data.qop ~= "auth" or not auth_data.cnonce or not auth_data.nc) then
+        return false
     end
 
     return true
@@ -178,17 +179,7 @@ local function parse_credentials_line(line)
     return username, realm, ha1_hash
 end
 
-local function generate_nonce()
-    local random_data = random.bytes(64)
-    if not random_data then
-        ngx_log(ngx_ERR, "Failed to generate random data for nonce")
-        return nil, "failed to generate random data"
-    end
-
-    local entropy = random_data:sub(1, 32)
-    local nonce_salt = random_data:sub(33, 48)
-    local opaque_data = random_data:sub(49, 64)
-
+local function get_or_init_counter()
     local counter = shared_memory:get("global_counter")
     if not counter then
         local initial_bytes = random.bytes(8)
@@ -210,10 +201,14 @@ local function generate_nonce()
         return nil, err
     end
 
+    return new_counter
+end
+
+local function build_nonce_string(entropy, counter, nonce_salt, opaque_data)
     local nonce_parts = {
         ngx.encode_base64(entropy),
         ":",
-        tostring(new_counter),
+        tostring(counter),
         ":",
         tostring(ngx.time()),
         ":",
@@ -223,13 +218,14 @@ local function generate_nonce()
         ":",
         ngx.encode_base64(opaque_data),
     }
+    return ngx.encode_base64(table.concat(nonce_parts))
+end
 
-    local nonce = ngx.encode_base64(table.concat(nonce_parts))
-
+local function store_nonce_metadata(nonce, counter, nonce_salt, opaque_data)
     local nonce_key = "nonce:" .. sanitize_key(nonce)
     local nonce_metadata = {
         timestamp = ngx.time(),
-        counter = new_counter,
+        counter = counter,
         nonce_salt = ngx.encode_base64(nonce_salt),
         opaque = ngx.encode_base64(opaque_data),
         uses = 0,
@@ -240,6 +236,32 @@ local function generate_nonce()
 
     if not ok then
         ngx_log(ngx_ERR, "Failed to store nonce metadata: ", err)
+        return nil, err
+    end
+
+    return true
+end
+
+local function generate_nonce()
+    local random_data = random.bytes(64)
+    if not random_data then
+        ngx_log(ngx_ERR, "Failed to generate random data for nonce")
+        return nil, "failed to generate random data"
+    end
+
+    local entropy = random_data:sub(1, 32)
+    local nonce_salt = random_data:sub(33, 48)
+    local opaque_data = random_data:sub(49, 64)
+
+    local counter, err = get_or_init_counter()
+    if not counter then
+        return nil, err
+    end
+
+    local nonce = build_nonce_string(entropy, counter, nonce_salt, opaque_data)
+
+    local ok, err = store_nonce_metadata(nonce, counter, nonce_salt, opaque_data)
+    if not ok then
         return nil, err
     end
 
@@ -470,6 +492,34 @@ local function check_username_enumeration(username, client_ip)
     return false
 end
 
+local function verify_opaque(auth_data, nonce_metadata)
+    if auth_data.opaque and nonce_metadata and nonce_metadata.opaque then
+        if auth_data.opaque ~= nonce_metadata.opaque then
+            ngx_log(ngx_WARN, "Opaque mismatch for user: ", sanitize_log_value(auth_data.username))
+            return false
+        end
+    end
+    return true
+end
+
+local function calculate_expected_response(auth_data, ha1)
+    -- Note: MD5 is required by RFC 2617 and cannot be changed without breaking the spec
+    local ha2 = ngx.md5(tab_concat({ ngx.req.get_method(), auth_data.uri }, ":"))
+
+    if auth_data.qop then
+        return ngx.md5(tab_concat({ ha1, auth_data.nonce, auth_data.nc, auth_data.cnonce, auth_data.qop, ha2 }, ":"))
+    else
+        return ngx.md5(tab_concat({ ha1, auth_data.nonce, ha2 }, ":"))
+    end
+end
+
+local function should_refresh_nonce(nonce_metadata)
+    if nonce_metadata and nonce_metadata.uses >= (config.max_nonce_uses * config.refresh_threshold / 100) then
+        return true
+    end
+    return false
+end
+
 local function verify_credentials(auth_data)
     local user_creds = user_credentials[auth_data.username]
     if not user_creds or user_creds.realm ~= auth_data.realm then
@@ -483,34 +533,17 @@ local function verify_credentials(auth_data)
         return false, true
     end
 
-    -- Verify opaque if provided
-    if auth_data.opaque and nonce_metadata and nonce_metadata.opaque then
-        if auth_data.opaque ~= nonce_metadata.opaque then
-            ngx_log(ngx_WARN, "Opaque mismatch for user: ", sanitize_log_value(auth_data.username))
-            return false, false
-        end
+    if not verify_opaque(auth_data, nonce_metadata) then
+        return false, false
     end
 
-    -- Calculate expected response
-    -- Note: MD5 is required by RFC 2617 and cannot be changed without breaking the spec
-    local ha2 = ngx.md5(tab_concat({ ngx.req.get_method(), auth_data.uri }, ":"))
-    local ha1 = user_creds.ha1_hash
-    local expected_response
-
-    if auth_data.qop then
-        expected_response =
-            ngx.md5(tab_concat({ ha1, auth_data.nonce, auth_data.nc, auth_data.cnonce, auth_data.qop, ha2 }, ":"))
-    else
-        expected_response = ngx.md5(tab_concat({ ha1, auth_data.nonce, ha2 }, ":"))
-    end
-
+    local expected_response = calculate_expected_response(auth_data, user_creds.ha1_hash)
     if not constant_time_compare(expected_response, auth_data.response) then
         ngx_log(ngx_WARN, "Invalid authentication attempt")
         return false, false
     end
 
-    -- Check if nonce needs refresh
-    if nonce_metadata and nonce_metadata.uses >= (config.max_nonce_uses * config.refresh_threshold / 100) then
+    if should_refresh_nonce(nonce_metadata) then
         ngx_log(ngx_DEBUG, "Nonce usage near limit, refreshing for user: ", sanitize_log_value(auth_data.username))
         return false, true
     end
@@ -567,58 +600,52 @@ local function send_challenge(stale)
 end
 
 -- Public API
-function DigestAuth.configure(options)
-    -- Merge with defaults
-    for key, value in pairs(DEFAULT_CONFIG) do
-        if options[key] == nil then
-            options[key] = value
-        end
-    end
-
-    config = options
-
-    -- Validate required options
-    if not config.shared_memory_name then
+local function validate_config_options(cfg)
+    if not cfg.shared_memory_name then
         return nil, "shared_memory_name is required"
     end
 
-    if not config.credentials_file then
+    if not cfg.credentials_file then
         return nil, "credentials_file is required"
     end
 
-    local valid_path, path_err = validate_file_path(config.credentials_file)
+    local valid_path, path_err = validate_file_path(cfg.credentials_file)
     if not valid_path then
         return nil, "Invalid credentials_file: " .. (path_err or "")
     end
 
-    -- Initialize shared memory
-    shared_memory = ngx.shared[config.shared_memory_name]
+    return true
+end
+
+local function initialize_shared_memory(cfg)
+    shared_memory = ngx.shared[cfg.shared_memory_name]
     if not shared_memory then
-        return nil, "Shared memory '" .. config.shared_memory_name .. "' not found"
+        return nil, "Shared memory '" .. cfg.shared_memory_name .. "' not found"
     end
 
-    -- Initialize rate limiting if enabled
-    if config.rate_limit.enabled then
-        local rate_limit_shm_name = config.rate_limit.shared_memory_name or "digest_auth_ratelimit"
+    if cfg.rate_limit.enabled then
+        local rate_limit_shm_name = cfg.rate_limit.shared_memory_name or "digest_auth_ratelimit"
         rate_limit_memory = ngx.shared[rate_limit_shm_name]
         if not rate_limit_memory then
-            ngx_log(
-                ngx_WARN,
-                "Rate limit shared memory '" .. rate_limit_shm_name .. "' not found, disabling rate limiting"
-            )
-            config.rate_limit.enabled = false
+            ngx_log(ngx_WARN, "Rate limit shared memory '" .. rate_limit_shm_name .. "' not found, disabling rate limiting")
+            cfg.rate_limit.enabled = false
         end
     end
 
-    -- Generate server salt
+    return true
+end
+
+local function generate_server_salt()
     local salt_bytes = random.bytes(16)
     if not salt_bytes then
         return nil, "Failed to generate server salt"
     end
     server_salt = ngx.encode_base64(salt_bytes)
+    return true
+end
 
-    -- Load user credentials
-    local file, err = io.open(config.credentials_file, "r")
+local function load_user_credentials(credentials_file)
+    local file, err = io.open(credentials_file, "r")
     if not file then
         return nil, "Failed to open credentials file: " .. err
     end
@@ -627,10 +654,7 @@ function DigestAuth.configure(options)
     for line in file:lines() do
         local username, realm, ha1_hash = parse_credentials_line(line)
         if username then
-            user_credentials[username] = {
-                realm = realm,
-                ha1_hash = ha1_hash,
-            }
+            user_credentials[username] = { realm = realm, ha1_hash = ha1_hash }
             ngx_log(ngx_DEBUG, "Loaded user: ", username, " (realm: ", realm, ")")
             users_loaded = users_loaded + 1
         else
@@ -644,8 +668,66 @@ function DigestAuth.configure(options)
         return nil, "No valid users found in credentials file"
     end
 
+    return users_loaded
+end
+
+function DigestAuth.configure(options)
+    -- Merge with defaults
+    for key, value in pairs(DEFAULT_CONFIG) do
+        if options[key] == nil then
+            options[key] = value
+        end
+    end
+
+    config = options
+
+    local ok, err = validate_config_options(config)
+    if not ok then
+        return nil, err
+    end
+
+    ok, err = initialize_shared_memory(config)
+    if not ok then
+        return nil, err
+    end
+
+    ok, err = generate_server_salt()
+    if not ok then
+        return nil, err
+    end
+
+    local users_loaded
+    users_loaded, err = load_user_credentials(config.credentials_file)
+    if not users_loaded then
+        return nil, err
+    end
+
     ngx_log(ngx_INFO, "DigestAuth configured successfully with ", users_loaded, " users")
     return true
+end
+
+local function perform_security_checks(client_ip, auth_data)
+    if is_brute_force_blocked(client_ip) then
+        ngx_log(ngx_WARN, "Request blocked due to brute force protection from: ", client_ip)
+        return ngx.exit(ngx.HTTP_FORBIDDEN)
+    end
+
+    if not check_rate_limit(client_ip) then
+        return ngx.exit(ngx.HTTP_FORBIDDEN)
+    end
+
+    local is_suspicious, pattern = detect_suspicious_pattern(auth_data, client_ip)
+    if is_suspicious then
+        block_client_brute_force(client_ip, pattern)
+        return ngx.exit(ngx.HTTP_FORBIDDEN)
+    end
+
+    if check_username_enumeration(auth_data.username, client_ip) then
+        block_client_brute_force(client_ip, "username_enumeration")
+        return ngx.exit(ngx.HTTP_FORBIDDEN)
+    end
+
+    return nil
 end
 
 function DigestAuth.require_auth(realm)
@@ -655,26 +737,13 @@ function DigestAuth.require_auth(realm)
     end
 
     local client_ip = ngx.var.remote_addr
-
-    -- Check brute force blocking first
-    if is_brute_force_blocked(client_ip) then
-        ngx_log(ngx_WARN, "Request blocked due to brute force protection from: ", client_ip)
-        return ngx.exit(ngx.HTTP_FORBIDDEN)
-    end
-
-    -- Check rate limiting
-    if not check_rate_limit(client_ip) then
-        return ngx.exit(ngx.HTTP_FORBIDDEN)
-    end
-
-    -- Check for authorization header
     local auth_header = ngx.var.http_authorization
+
     if not auth_header then
         ngx_log(ngx_DEBUG, "No authorization header from: ", client_ip)
         return send_challenge(false)
     end
 
-    -- Parse authorization header
     local auth_data = parse_authorization_header(auth_header)
     if not auth_data then
         ngx_log(ngx_WARN, "Malformed authorization header from: ", client_ip)
@@ -682,20 +751,11 @@ function DigestAuth.require_auth(realm)
         return ngx.exit(ngx.HTTP_BAD_REQUEST)
     end
 
-    -- Check for suspicious patterns
-    local is_suspicious, pattern = detect_suspicious_pattern(auth_data, client_ip)
-    if is_suspicious then
-        block_client_brute_force(client_ip, pattern)
-        return ngx.exit(ngx.HTTP_FORBIDDEN)
+    local security_result = perform_security_checks(client_ip, auth_data)
+    if security_result then
+        return security_result
     end
 
-    -- Check for username enumeration
-    if check_username_enumeration(auth_data.username, client_ip) then
-        block_client_brute_force(client_ip, "username_enumeration")
-        return ngx.exit(ngx.HTTP_FORBIDDEN)
-    end
-
-    -- Verify credentials
     local success, stale = verify_credentials(auth_data)
     if not success then
         increment_failed_attempts(client_ip, auth_data.username)
@@ -751,27 +811,33 @@ function DigestAuth.clear_nonces()
     ngx_log(ngx_INFO, "Cleared ", #keys_to_delete, " nonce entries")
 end
 
+local function is_nonce_expired(key, current_time)
+    local encoded_metadata = shared_memory:get(key)
+    if not encoded_metadata then
+        return false
+    end
+
+    local ok, metadata = pcall(cjson.decode, encoded_metadata)
+    if ok and metadata and metadata.timestamp then
+        return current_time - metadata.timestamp > (config.nonce_lifetime or 600)
+    end
+
+    return false
+end
+
 function DigestAuth.cleanup_expired_nonces()
     if not shared_memory then
         return
     end
+
     local current_time = ngx.time()
     local keys_to_delete = {}
-    -- get_keys(0) returns all keys
     local keys = shared_memory:get_keys(0)
 
     if keys then
         for _, key in ipairs(keys) do
-            if key:match("^nonce:") then
-                local encoded_metadata = shared_memory:get(key)
-                if encoded_metadata then
-                    local ok, metadata = pcall(cjson.decode, encoded_metadata)
-                    if ok and metadata and metadata.timestamp then
-                        if current_time - metadata.timestamp > (config.nonce_lifetime or 600) then
-                            table.insert(keys_to_delete, key)
-                        end
-                    end
-                end
+            if key:match("^nonce:") and is_nonce_expired(key, current_time) then
+                table.insert(keys_to_delete, key)
             end
         end
     end
