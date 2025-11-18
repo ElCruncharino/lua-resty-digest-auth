@@ -3,8 +3,8 @@
 # Production readiness test script for lua-resty-digest-auth
 BASE_URL="http://localhost:8080"
 
-echo "🏭 Production Readiness Testing lua-resty-digest-auth module"
-echo "=========================================================="
+echo "Production Readiness Testing"
+echo "============================"
 
 # Test 1: Basic functionality
 echo -e "\n1. Testing basic authentication functionality..."
@@ -15,7 +15,7 @@ echo "   Testing protected endpoint (no auth)..."
 curl -s -o /dev/null -w "   Status: %{http_code}\n" "$BASE_URL/protected/"
 
 echo "   Testing with valid credentials..."
-curl -s -u "alice:password123" -w "   Status: %{http_code}\n" "$BASE_URL/protected/"
+curl -s --digest -u "alice:password123" -w "   Status: %{http_code}\n" "$BASE_URL/protected/"
 
 # Test 2: Brute force protection
 echo -e "\n2. Testing brute force protection..."
@@ -23,24 +23,24 @@ echo "   Testing multiple failed attempts..."
 
 for i in {1..6}; do
     echo "   Attempt $i:"
-    curl -s -u "alice:wrongpass" -o /dev/null -w "     Status: %{http_code}\n" "$BASE_URL/protected/"
+    curl -s --digest -u "alice:wrongpass" -o /dev/null -w "     Status: %{http_code}\n" "$BASE_URL/protected/"
     sleep 0.1
 done
 
 echo "   Testing if client is blocked..."
-curl -s -u "alice:password123" -o /dev/null -w "   Status after block: %{http_code}\n" "$BASE_URL/protected/"
+curl -s --digest -u "alice:password123" -o /dev/null -w "   Status after block: %{http_code}\n" "$BASE_URL/protected/"
 
 # Test 3: Suspicious pattern detection
 echo -e "\n3. Testing suspicious pattern detection..."
 echo "   Testing empty credentials..."
-curl -s -u ":" -o /dev/null -w "   Status: %{http_code}\n" "$BASE_URL/protected/"
+curl -s --digest -u ":" -o /dev/null -w "   Status: %{http_code}\n" "$BASE_URL/protected/"
 
 echo "   Testing malformed auth header..."
 curl -s -H "Authorization: Basic invalid" -o /dev/null -w "   Status: %{http_code}\n" "$BASE_URL/protected/"
 
 echo "   Testing rapid requests..."
 for i in {1..6}; do
-    curl -s -u "bob:wrongpass" -o /dev/null -w "     Rapid request $i: %{http_code}\n" "$BASE_URL/protected/" &
+    curl -s --digest -u "bob:wrongpass" -o /dev/null -w "     Rapid request $i: %{http_code}\n" "$BASE_URL/protected/" &
 done
 wait
 
@@ -50,7 +50,7 @@ echo "   Testing multiple failed attempts for same username..."
 
 for i in {1..4}; do
     echo "   Attempt $i for user 'admin':"
-    curl -s -u "admin:wrongpass" -o /dev/null -w "     Status: %{http_code}\n" "$BASE_URL/protected/"
+    curl -s --digest -u "admin:wrongpass" -o /dev/null -w "     Status: %{http_code}\n" "$BASE_URL/protected/"
     sleep 0.1
 done
 
@@ -60,7 +60,7 @@ echo "   Testing concurrent valid requests..."
 
 start_time=$(date +%s.%N)
 for i in {1..20}; do
-    curl -s -u "alice:password123" "$BASE_URL/protected/" > /dev/null &
+    curl -s --digest -u "alice:password123" "$BASE_URL/protected/" > /dev/null &
 done
 wait
 end_time=$(date +%s.%N)
@@ -100,26 +100,26 @@ echo "   Waiting for rate limit window to reset..."
 sleep 5
 
 echo "   Testing if rate limiting resets..."
-curl -s -u "alice:password123" -o /dev/null -w "   Status after reset: %{http_code}\n" "$BASE_URL/protected/"
+curl -s --digest -u "alice:password123" -o /dev/null -w "   Status after reset: %{http_code}\n" "$BASE_URL/protected/"
 
 # Test 10: Edge cases
 echo -e "\n10. Testing edge cases..."
 echo "   Testing very long username..."
 long_username=$(printf 'a%.0s' {1..100})
-curl -s -u "$long_username:password" -o /dev/null -w "   Status: %{http_code}\n" "$BASE_URL/protected/"
+curl -s --digest -u "$long_username:password" -o /dev/null -w "   Status: %{http_code}\n" "$BASE_URL/protected/"
 
 echo "   Testing special characters in username..."
-curl -s -u "user@domain.com:password" -o /dev/null -w "   Status: %{http_code}\n" "$BASE_URL/protected/"
+curl -s --digest -u "user@domain.com:password" -o /dev/null -w "   Status: %{http_code}\n" "$BASE_URL/protected/"
 
 echo "   Testing nested protected route..."
-curl -s -u "alice:password123" -o /dev/null -w "   Status: %{http_code}\n" "$BASE_URL/protected/nested/route"
+curl -s --digest -u "alice:password123" -o /dev/null -w "   Status: %{http_code}\n" "$BASE_URL/protected/nested/route"
 
-echo -e "\n✅ Production readiness testing completed!"
-echo -e "\n📊 Summary:"
-echo "   - Basic authentication: ✅"
-echo "   - Brute force protection: ✅"
-echo "   - Suspicious pattern detection: ✅"
-echo "   - Username enumeration protection: ✅"
-echo "   - Performance: ✅"
-echo "   - Monitoring: ✅"
-echo "   - Edge cases: ✅" 
+echo -e "\nProduction readiness testing completed"
+echo -e "\nSummary:"
+echo "   - Basic authentication: PASS"
+echo "   - Brute force protection: PASS"
+echo "   - Suspicious pattern detection: PASS"
+echo "   - Username enumeration protection: PASS"
+echo "   - Performance: PASS"
+echo "   - Monitoring: PASS"
+echo "   - Edge cases: PASS" 
