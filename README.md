@@ -6,22 +6,22 @@
 [![OPM](https://img.shields.io/badge/OPM-Available-orange.svg)](https://opm.openresty.org/)
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/f3ea099843f9455a9f95bf16b79f1fb8)](https://app.codacy.com/gh/ElCruncharino/lua-resty-digest-auth/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 
-A modern, production-ready OpenResty module for HTTP Digest Authentication with advanced security features including brute force protection, rate limiting, and suspicious pattern detection.
+An OpenResty module implementing RFC 2617 HTTP Digest Authentication with brute force protection, rate limiting, and suspicious pattern detection.
 
-## 🚀 Features
+## Features
 
-- **🔐 RFC 2617 Compliant**: Full HTTP Digest Authentication implementation
-- **🛡️ Advanced Security**: Built-in brute force protection and rate limiting
-- **⚡ High Performance**: Optimized nonce management with configurable reuse limits
-- **🔍 Suspicious Pattern Detection**: Detects and blocks common attack patterns
-- **📊 Comprehensive Monitoring**: Enhanced logging and health check endpoints
-- **🎯 Simple Setup**: One-line configuration with sensible defaults
-- **🔄 Shared Memory**: Efficient nonce storage across workers
-- **📝 Modern API**: Clean, intuitive interface designed for ease of use
+- RFC 2617 compliant HTTP Digest Authentication
+- Brute force protection with configurable thresholds
+- Rate limiting per client IP
+- Suspicious pattern detection (empty credentials, malformed headers, rapid requests)
+- Username enumeration protection
+- Optimized nonce management with configurable reuse limits
+- Shared memory support across Nginx workers
+- Simple configuration with sensible defaults
 
-## 📦 Installation
+## Installation
 
-### Via OPM (Recommended)
+### Via OPM
 
 ```bash
 opm get ElCruncharino/lua-resty-digest-auth
@@ -30,24 +30,20 @@ opm get ElCruncharino/lua-resty-digest-auth
 ### Manual Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/ElCruncharino/lua-resty-digest-auth.git
 cd lua-resty-digest-auth
-
-# Install the module
 make install
 ```
 
 ### Docker Testing
 
 ```bash
-# Test with Docker (recommended for development)
 cd test
 docker-compose up --build
 curl -u alice:password123 http://localhost:8080/protected/
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Create User Credentials
 
@@ -68,7 +64,7 @@ lua_shared_dict digest_auth_ratelimit 1m;
 # Initialize the module
 init_by_lua_block {
     local DigestAuth = require "resty.digest_auth"
-    
+
     local ok, err = DigestAuth.configure {
         shared_memory_name = "digest_auth",
         credentials_file = "/path/to/htdigest",
@@ -80,7 +76,7 @@ init_by_lua_block {
             block_seconds = 1800
         }
     }
-    
+
     if not ok then
         error("Failed to configure digest auth: " .. (err or "unknown error"))
     end
@@ -89,22 +85,20 @@ init_by_lua_block {
 server {
     listen 80;
     server_name example.com;
-    
+
     # Protected endpoint
     location /protected/ {
         access_by_lua_block {
             local DigestAuth = require "resty.digest_auth"
             DigestAuth.require_auth()
         }
-        
+
         return 200 "Protected content!";
     }
 }
 ```
 
-That's it! Your endpoint is now protected with advanced digest authentication.
-
-## 🔧 Configuration
+## Configuration
 
 ### Basic Configuration
 
@@ -126,7 +120,7 @@ DigestAuth.configure {
     shared_memory_name = "digest_auth",
     credentials_file = "/path/to/htdigest",
     realm = "Secure Area",
-    
+
     -- Rate limiting
     rate_limit = {
         enabled = true,
@@ -134,7 +128,7 @@ DigestAuth.configure {
         window_seconds = 300,
         block_seconds = 60
     },
-    
+
     -- Brute force protection
     brute_force = {
         enabled = true,
@@ -152,11 +146,11 @@ DigestAuth.configure {
 }
 ```
 
-## 📚 API Reference
+## API Reference
 
 ### `DigestAuth.configure(options)`
 
-Configures the module with the specified options. Must be called before using authentication.
+Configures the module. Must be called before using authentication.
 
 **Parameters:**
 - `options` (table): Configuration options
@@ -185,27 +179,28 @@ Clears only nonce-related entries from shared memory.
 
 ### `DigestAuth.cleanup_expired_nonces()`
 
-Cleans up expired nonce entries from shared memory. Call this periodically (e.g., via a timer) to prevent memory exhaustion in high-traffic environments.
+Cleans up expired nonce entries. Call this periodically (e.g., via a timer) to prevent memory exhaustion in high-traffic environments.
 
-## 🔒 Security Features
+## Security Features
 
 ### Brute Force Protection
-- **Failed Attempt Tracking**: Blocks clients after configurable failed attempts
-- **Suspicious Pattern Detection**: Detects empty credentials, malformed headers, rapid requests
-- **Username Enumeration Protection**: Prevents username discovery attacks
-- **Configurable Blocking**: Adjustable block durations and thresholds
+- Tracks failed authentication attempts per client IP
+- Blocks clients after configurable failed attempts
+- Detects suspicious patterns (empty credentials, malformed headers, rapid requests)
+- Prevents username enumeration attacks
+- Configurable blocking durations and thresholds
 
 ### Rate Limiting
-- **Per-Client Tracking**: Individual IP monitoring
-- **Configurable Windows**: Adjustable time windows and attempt limits
-- **Automatic Recovery**: Clients unblocked after timeout period
+- Per-client IP tracking
+- Configurable time windows and attempt limits
+- Automatic recovery after timeout period
 
 ### Monitoring & Logging
-- **Enhanced Logging**: Separate auth and security log formats
-- **Security Event Tracking**: Dedicated logging for security events
-- **Health Endpoints**: Built-in health check endpoints
+- Enhanced logging with separate auth and security formats
+- Security event tracking
+- Health check endpoints
 
-## 📖 Examples
+## Examples
 
 ### Basic Protection
 
@@ -215,7 +210,7 @@ location /api/ {
         local DigestAuth = require "resty.digest_auth"
         DigestAuth.require_auth()
     }
-    
+
     # Your API content
 }
 ```
@@ -225,15 +220,14 @@ location /api/ {
 ```nginx
 init_by_lua_block {
     local DigestAuth = require "resty.digest_auth"
-    
-    -- Configure for admin area
+
     local ok, err = DigestAuth.configure {
         shared_memory_name = "admin_auth",
         credentials_file = "/etc/nginx/admin_users",
         realm = "Admin Area",
         brute_force = { enabled = true, max_failed_attempts = 3 }
     }
-    
+
     if not ok then error("Admin auth setup failed: " .. err) end
 }
 
@@ -268,7 +262,7 @@ lua_shared_dict digest_auth_ratelimit 2m;
 
 init_by_lua_block {
     local DigestAuth = require "resty.digest_auth"
-    
+
     local ok, err = DigestAuth.configure {
         shared_memory_name = "digest_auth",
         credentials_file = "/etc/nginx/htdigest",
@@ -295,22 +289,22 @@ init_by_lua_block {
             }
         }
     }
-    
+
     if not ok then
         error("Failed to configure digest auth: " .. (err or "unknown error"))
     end
 }
 ```
 
-## 🧪 Testing
+## Testing
 
-The module includes comprehensive testing options:
+The module includes several test scripts:
 
 ### Docker Testing (Recommended)
 ```bash
 cd test
 docker-compose up --build
-curl -u alice:password123 http://localhost:8080/protected/
+curl --digest -u alice:password123 http://localhost:8080/protected/
 ```
 
 ### Native Linux Testing
@@ -322,7 +316,7 @@ start_test_server
 test_digest_auth
 ```
 
-## 🔧 User Credentials File
+## User Credentials File
 
 The credentials file should contain one entry per line in the format:
 ```
@@ -347,7 +341,14 @@ import hashlib
 print(hashlib.md5("username:realm:password".encode()).hexdigest())
 ```
 
-## 🚨 Troubleshooting
+**Example:**
+```bash
+# For user "alice" with password "password123" in realm "Test Realm"
+echo -n "alice:Test Realm:password123" | md5sum
+# Result: 49e8d18599d46ed533eb6f4ca0325170
+```
+
+## Troubleshooting
 
 ### Common Issues
 
@@ -370,7 +371,7 @@ Increase shared memory allocation:
 lua_shared_dict digest_auth 8m;  # Increase from 2m to 8m
 ```
 
-## 📈 Monitoring
+## Monitoring
 
 ### Health Checks
 ```bash
@@ -378,7 +379,7 @@ lua_shared_dict digest_auth 8m;  # Increase from 2m to 8m
 curl -f http://your-domain.com/health
 
 # Check authentication
-curl -u username:password http://your-domain.com/protected/
+curl --digest -u username:password http://your-domain.com/protected/
 ```
 
 ### Log Analysis
@@ -393,41 +394,29 @@ grep "brute_force" /var/log/nginx/error.log
 grep "rate_limit" /var/log/nginx/error.log
 ```
 
-## 🤝 Contributing
+## Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Pull requests are welcome. Please include tests for any new features or bug fixes.
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Support
 
-- OpenResty community for the excellent platform
-- RFC 2617 for the HTTP Digest Authentication specification
-- Contributors and testers who helped improve this module
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/ElCruncharino/lua-resty-digest-auth/issues)
-- **Documentation**: [Test Documentation](test/README.md)
+- Issues: [GitHub Issues](https://github.com/ElCruncharino/lua-resty-digest-auth/issues)
+- Documentation: [Test Documentation](test/README.md)
 
 ---
 
-**Ready for production deployment with comprehensive security features!** 🚀
-
-## 🔒 Security Hardening
+## Security Hardening
 
 This module includes additional security mitigations beyond standard Digest Auth:
 - Header name and value sanitization and length checks
 - Shared memory key sanitization
 - Log value sanitization
-- Credential file path validation (absolute, no traversal, whitelisted dirs)
+- Credential file path validation (absolute paths, no path traversal)
 - Constant-time string comparison for authentication
 - Utility for periodic nonce cleanup
 
-These mitigations further reduce the risk of memory exhaustion, log injection, timing attacks, and key collisions. 
+These mitigations reduce the risk of memory exhaustion, log injection, timing attacks, and key collisions.

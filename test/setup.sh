@@ -5,7 +5,7 @@
 
 set -e
 
-echo "🚀 Setting up lua-resty-digest-auth test environment..."
+echo "Setting up lua-resty-digest-auth test environment..."
 
 # Colors for output
 RED='\033[0;31m'
@@ -252,21 +252,21 @@ sudo cp /tmp/nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
 
 # Create test script
 print_status "Creating test script..."
-cat > /tmp/test_digest_auth.sh << 'EOF'
+cat > /tmp/basic_auth_test.sh << 'EOF'
 #!/bin/bash
 
-# Test script for lua-resty-digest-auth
+# Basic authentication test script for lua-resty-digest-auth
 BASE_URL="http://localhost:8080"
 
-echo "🧪 Testing lua-resty-digest-auth module..."
-echo "=========================================="
+echo "Testing lua-resty-digest-auth module"
+echo "===================================="
 
 # Test public endpoint
 echo -e "\n1. Testing public endpoint..."
 curl -s -o /dev/null -w "Status: %{http_code}\n" "$BASE_URL/"
 
 # Test protected endpoint (should get 401)
-echo -e "\n2. Testing protected endpoint (expecting 401)..."
+echo -e "\n2. Testing protected endpoint without credentials (expecting 401)..."
 curl -s -o /dev/null -w "Status: %{http_code}\n" "$BASE_URL/protected/"
 
 # Test with valid credentials
@@ -289,15 +289,15 @@ curl -s -u "admin:adminpass" -w "Status: %{http_code}\n" "$BASE_URL/admin/"
 echo -e "\n7. Testing health endpoint..."
 curl -s -w "Status: %{http_code}\n" "$BASE_URL/health"
 
-echo -e "\n✅ Testing complete!"
-echo -e "\nTo test manually:"
+echo -e "\nTesting complete"
+echo -e "\nManual test commands:"
 echo "  curl -u alice:password123 http://localhost:8080/protected/"
 echo "  curl -u bob:secret456 http://localhost:8080/api/"
 echo "  curl -u admin:adminpass http://localhost:8080/admin/"
 EOF
 
-chmod +x /tmp/test_digest_auth.sh
-sudo mv /tmp/test_digest_auth.sh /usr/local/bin/test_digest_auth
+chmod +x /tmp/basic_auth_test.sh
+sudo mv /tmp/basic_auth_test.sh /usr/local/bin/basic_auth_test
 
 # Create start/stop scripts
 print_status "Creating service management scripts..."
@@ -330,24 +330,24 @@ sudo mv /tmp/restart_test_server.sh /usr/local/bin/restart_test_server
 
 print_success "Setup complete!"
 echo ""
-echo "📋 Next steps:"
+echo "Next steps:"
 echo "1. Start the test server: start_test_server"
-echo "2. Run the test script: test_digest_auth"
+echo "2. Run the test script: basic_auth_test"
 echo "3. Test manually with curl:"
 echo "   curl -u alice:password123 http://localhost:8080/protected/"
 echo ""
-echo "🔧 Management commands:"
+echo "Management commands:"
 echo "  start_test_server  - Start the test server"
 echo "  stop_test_server   - Stop the test server"
 echo "  restart_test_server - Restart the test server"
-echo "  test_digest_auth   - Run automated tests"
+echo "  basic_auth_test   - Run automated tests"
 echo ""
-echo "📁 Files created:"
+echo "Files created:"
 echo "  /etc/nginx/htdigest - Test credentials"
 echo "  /usr/local/openresty/nginx/conf/nginx.conf - Test configuration"
 echo "  /usr/local/openresty/lualib/resty/digest_auth.lua - Module installed"
 echo ""
-echo "🌐 Test URLs:"
+echo "Test URLs:"
 echo "  http://localhost:8080/ - Public content"
 echo "  http://localhost:8080/protected/ - Protected content"
 echo "  http://localhost:8080/api/ - API endpoint"
