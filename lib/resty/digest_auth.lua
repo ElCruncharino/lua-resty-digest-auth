@@ -627,7 +627,10 @@ local function initialize_shared_memory(cfg)
         local rate_limit_shm_name = cfg.rate_limit.shared_memory_name or "digest_auth_ratelimit"
         rate_limit_memory = ngx.shared[rate_limit_shm_name]
         if not rate_limit_memory then
-            ngx_log(ngx_WARN, "Rate limit shared memory '" .. rate_limit_shm_name .. "' not found, disabling rate limiting")
+            ngx_log(
+                ngx_WARN,
+                "Rate limit shared memory '" .. rate_limit_shm_name .. "' not found, disabling rate limiting"
+            )
             cfg.rate_limit.enabled = false
         end
     end
