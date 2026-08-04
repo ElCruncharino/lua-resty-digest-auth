@@ -70,11 +70,11 @@ local function sanitize_header_name(name)
 end
 
 local function sanitize_key(key)
-    return tostring(key):gsub("[^%w%-]", "_")
+    return (tostring(key):gsub("[^%w%-]", "_"))
 end
 
 local function sanitize_log_value(value)
-    return tostring(value):gsub("[%z\1-\31]", "?")
+    return (tostring(value):gsub("[%z\1-\31]", "?"))
 end
 
 local function constant_time_compare(a, b)
@@ -282,15 +282,17 @@ local function validate_nonce(nonce)
         return true, nil
     end
 
-    metadata.uses = metadata.uses + 1
-    local updated_metadata = cjson.encode(metadata)
-    local ok, err = shared_memory:set(nonce_key, updated_metadata, config.nonce_lifetime)
-    if not ok then
-        ngx_log(ngx_ERR, "Failed to update nonce usage count: ", err)
+    local uses_key = "nonce_uses:" .. sanitize_key(nonce)
+    local uses, incr_err = shared_memory:incr(uses_key, 1, 0, config.nonce_lifetime)
+    if not uses then
+        ngx_log(ngx_ERR, "Failed to increment nonce usage count: ", incr_err)
+        return true, metadata
     end
 
-    if metadata.uses > config.max_nonce_uses then
-        ngx_log(ngx_WARN, "Nonce exceeded usage limit: ", metadata.uses, "/", config.max_nonce_uses)
+    metadata.uses = uses
+
+    if uses > config.max_nonce_uses then
+        ngx_log(ngx_WARN, "Nonce exceeded usage limit: ", uses, "/", config.max_nonce_uses)
         return true, metadata
     end
 
@@ -324,7 +326,7 @@ local function increment_rate_limit(client_ip)
     end
 
     local attempts_key = "attempts:" .. sanitize_key(client_ip)
-    local new_attempts, err = rate_limit_memory:incr(attempts_key, 1, config.rate_limit.window_seconds)
+    local new_attempts, err = rate_limit_memory:incr(attempts_key, 1, 0, config.rate_limit.window_seconds)
     if not new_attempts then
         ngx_log(ngx_ERR, "Failed to increment rate limit counter: ", err)
     end
@@ -397,7 +399,7 @@ local function increment_failed_attempts(client_ip, username)
 
     -- Track failed attempts per client
     local failed_key = "failed_attempts:" .. sanitize_key(client_ip)
-    local failed_count, err = rate_limit_memory:incr(failed_key, 1, config.brute_force.window_seconds)
+    local failed_count, err = rate_limit_memory:incr(failed_key, 1, 0, config.brute_force.window_seconds)
     if not failed_count then
         ngx_log(ngx_ERR, "Failed to increment failed attempts counter: ", err)
         return
@@ -406,7 +408,7 @@ local function increment_failed_attempts(client_ip, username)
     -- Track failed attempts per username (for enumeration detection)
     if username then
         local username_key = "failed_username:" .. sanitize_key(username)
-        local username_failed, err = rate_limit_memory:incr(username_key, 1, config.brute_force.window_seconds)
+        local username_failed, err = rate_limit_memory:incr(username_key, 1, 0, config.brute_force.window_seconds)
         if not username_failed then
             ngx_log(ngx_ERR, "Failed to increment username failed attempts counter: ", err)
         end
@@ -436,7 +438,7 @@ end
 
 local function check_rapid_requests(client_ip, patterns)
     local rapid_key = "rapid_requests:" .. sanitize_key(client_ip)
-    local rapid_count = rate_limit_memory:incr(rapid_key, 1, 1)
+    local rapid_count = rate_limit_memory:incr(rapid_key, 1, 0, 1)
     if rapid_count and rapid_count > patterns.rapid_requests then
         ngx_log(ngx_WARN, "Suspicious pattern detected: rapid requests from ", sanitize_log_value(client_ip))
         return true, "rapid_requests"
@@ -718,6 +720,8 @@ local function perform_security_checks(client_ip, auth_data)
     if not check_rate_limit(client_ip) then
         return ngx.exit(ngx.HTTP_FORBIDDEN)
     end
+
+    increment_rate_limit(client_ip)
 
     local is_suspicious, pattern = detect_suspicious_pattern(auth_data, client_ip)
     if is_suspicious then
