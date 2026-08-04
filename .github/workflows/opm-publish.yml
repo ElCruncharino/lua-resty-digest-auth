@@ -15,10 +15,12 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Configure opmrc
+        env:
+          OPM_TOKEN: ${{ secrets.OPM_TOKEN }}
         run: |
           cat > ~/.opmrc <<EOF
           github_account=ElCruncharino
-          github_token=${{ secrets.OPM_TOKEN }}
+          github_token=$OPM_TOKEN
           EOF
 
       - run: opm upload
