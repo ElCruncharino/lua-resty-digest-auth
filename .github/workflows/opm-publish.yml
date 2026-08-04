@@ -26,6 +26,8 @@ jobs:
           cat > ~/.opmrc <<EOF
           github_account=ElCruncharino
           github_token=$OPM_TOKEN
+          upload_server=https://opm.openresty.org
+          download_server=https://opm.openresty.org
           EOF
 
       - run: opm upload
