@@ -1,0 +1,24 @@
+name: Publish to OPM
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  opm-publish:
+    runs-on: ubuntu-latest
+    container: openresty/openresty:alpine
+    steps:
+      - name: Install checkout/opm dependencies
+        run: apk add --no-cache git curl bash perl tar
+
+      - uses: actions/checkout@v5
+
+      - name: Configure opmrc
+        run: |
+          cat > ~/.opmrc <<EOF
+          github_account=ElCruncharino
+          github_token=${{ secrets.OPM_TOKEN }}
+          EOF
+
+      - run: opm upload
