@@ -146,6 +146,10 @@ DigestAuth.configure {
 }
 ```
 
+**Client IP trust boundary.** All IP-based protections (rate limiting, brute-force blocking, enumeration detection) key off `ngx.var.remote_addr`. Behind a reverse proxy or load balancer you MUST configure nginx's `set_real_ip_from` and `real_ip_header` so `remote_addr` reflects the real client IP. Without it every client collapses into a single bucket, and a client that can set the forwarded header can spoof its identity. Either way, rate limiting and brute-force protection stop working.
+
+**Shared memory sizing.** Size `lua_shared_dict` for your expected volume of concurrent clients, nonces, and rate-limit keys; each tracked key costs roughly 100-200 bytes including its value. The values in `test/nginx.conf` are sized for the test suite, not production. An undersized dict silently evicts entries under `ngx.shared` LRU pressure, which quietly discards active rate-limit and brute-force state.
+
 ## API Reference
 
 ### `DigestAuth.configure(options)`
