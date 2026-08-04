@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.5] - 2026-08-04
+
+### Fixed
+- Fixed non-atomic nonce-use counter (race under concurrent requests)
+- Fixed `incr()` argument order across rate-limit, brute-force, and rapid-request counters — the old calls passed the TTL as the initial value with no expiry, causing permanent lockout after a single failed login and permanent "suspicious" flags after a handful of requests
+- Wired up rate limiting, which was previously dead code
+- Fixed a Lua multi-return bug in `sanitize_log_value`/`sanitize_key` that silently appended a stray digit to logged values (e.g. block-until timestamps)
+
+### Added
+- README notes on client IP trust boundary (reverse proxy `set_real_ip_from` requirement) and shared memory sizing for production
+- Test-only markers on unauthenticated `/admin/*` endpoints in test/nginx.conf
+
 ## [1.0.4] - 2026-08-04
 
 ### Fixed
