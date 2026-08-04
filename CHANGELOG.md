@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.4] - 2026-08-04
+
+### Fixed
+- Fixed StyLua formatting violation in `initialize_shared_memory` that was blocking the CI lint job
+
 ## [1.0.3] - 2025-11-18
 
 ### Fixed
